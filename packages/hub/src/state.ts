@@ -1,5 +1,5 @@
 // セッションの状態管理（純粋関数）。保存や配信からは切り離して単体テストする。
-import type { AgentKind, PermissionMode, SessionEvent, SessionStatus } from '@agentpwa/shared';
+import type { AgentKind, EffortLevel, PermissionMode, SessionEvent, SessionStatus } from '@agentpwa/shared';
 import type { ApprovalRequest, QuestionRequest, Rank, SessionSummary } from './api.ts';
 
 export interface SessionRecord {
@@ -9,6 +9,7 @@ export interface SessionRecord {
   cwd: string;
   folderName: string;
   model?: string;
+  effort?: EffortLevel;
   permissionMode: PermissionMode;
   status: SessionStatus;
   statusReason?: string;
@@ -39,6 +40,7 @@ export function newRecord(p: {
   cwd: string;
   folderName: string;
   model?: string;
+  effort?: EffortLevel;
   permissionMode: PermissionMode;
   now: string;
 }): SessionRecord {
@@ -105,6 +107,11 @@ export function applyEvent(rec: SessionRecord, ev: SessionEvent): SessionRecord 
     case 'permission_mode':
       // Driver が報告した「現在のモード」。次に起動・再開するときもこの値を渡す
       r.permissionMode = ev.mode;
+      break;
+    case 'model':
+      // Driver が報告した「現在のモデルとエフォート」。次に起動・再開するときもこの値を渡す
+      r.model = ev.model;
+      r.effort = ev.effort;
       break;
     case 'tool':
       r.activity = oneLine(`${ev.name} ${ev.summary}`);
@@ -189,6 +196,7 @@ export function toSummary(rec: SessionRecord, extra: { machine: string; live: bo
     folderName: rec.folderName,
     machine: extra.machine,
     model: rec.model,
+    effort: rec.effort,
     permissionMode: rec.permissionMode,
     status: rec.status,
     statusReason: rec.statusReason,

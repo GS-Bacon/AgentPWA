@@ -1,6 +1,6 @@
 // Hub ⇔ Web の API で使う型（Web からは `import type` だけで参照する）。
 // Driver との契約（@agentpwa/shared）とは別に、Hub が Web に見せる形をここで決める。
-import type { AgentKind, AuthCheck, DriverEvent, PermissionMode, SessionEvent, SessionStatus } from '@agentpwa/shared';
+import type { AgentKind, AuthCheck, DriverEvent, EffortLevel, PermissionMode, SessionEvent, SessionStatus } from '@agentpwa/shared';
 
 export type ApprovalRequest = Extract<DriverEvent, { type: 'approval_request' }> & { at: string };
 export type QuestionRequest = Extract<DriverEvent, { type: 'question' }> & { at: string };
@@ -19,7 +19,9 @@ export interface SessionSummary {
   cwd: string;
   folderName: string;
   machine: string;
+  /** 現在のモデルとエフォート（Driver が送る model の値。省略はエージェントの既定） */
   model?: string;
+  effort?: EffortLevel;
   /** 現在の権限モード（Driver が送る permission_mode の値） */
   permissionMode: PermissionMode;
   status: SessionStatus;
@@ -77,7 +79,9 @@ export interface CreateSessionRequest {
   agent?: AgentKind;
   /** 許可リストのフォルダのパス */
   cwd: string;
+  /** モデルとエフォート。省略はエージェントの既定（実行中も set_model で変えられる） */
   model?: string;
+  effort?: EffortLevel;
   /** 省略時はプロジェクトの既定（defaultPermissionMode、なければ 'ask'）。full_auto は許可したプロジェクトだけ */
   permissionMode?: PermissionMode;
   prompt?: string;

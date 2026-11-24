@@ -11,6 +11,7 @@ import { buildItems, type Item, type ToolItem } from '../lib/transcript.ts';
 import { ApprovalCard, QuestionCard } from './Requests.tsx';
 import { IconSend, IconStop } from './Icons.tsx';
 import { PermissionButton, usePermissionSwitch } from './PermissionMode.tsx';
+import { ModelButton } from './ModelSettings.tsx';
 
 const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
@@ -108,9 +109,9 @@ function Composer({ session, compact }: { session: SessionSummary; compact?: boo
     : stopped ? (session.resumable ? '送信するとセッションを再開します…' : '送信すると新しく始めます…') : running ? '実行中も追加の指示を送れます…' : '指示を入力…';
   return (
     <footer className="composer">
-      {!compact && session.model && (
+      {!compact && (
         <div className="composer-meta">
-          <span className="tag">{session.model}</span>
+          <ModelButton session={session} disabled={archived} />
         </div>
       )}
       <div className="composer-row">

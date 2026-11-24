@@ -9,7 +9,7 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import readline from 'node:readline';
-import type { DriverEvent, DriverSession, PermissionMode, SessionStatus, StartOptions, UserAction } from '@agentpwa/shared';
+import type { DriverEvent, DriverSession, EffortLevel, PermissionMode, SessionStatus, StartOptions, UserAction } from '@agentpwa/shared';
 import type { ProcessLauncher } from './launcher.ts';
 import { StreamMapper } from './mapper.ts';
 import { answerToUpdatedInput, buildPrompt, sessionAllowKey, toClaudePermissionMode } from './permissions.ts';
@@ -64,6 +64,9 @@ export class ClaudeSession implements DriverSession {
   /** いまの権限モード（次に起動するときの --permission-mode にも使う） */
   private mode: PermissionMode;
   private lastEmittedMode: PermissionMode | undefined;
+  /** いまのモデルとエフォート（undefined は CLI の既定。次に起動するときの --model / --effort にも使う） */
+  private model: string | undefined;
+  private effort: EffortLevel | undefined;
   private stopping = false;
   private stopped = false;
   private interrupting = false;
@@ -80,10 +83,13 @@ export class ClaudeSession implements DriverSession {
   ) {
     this.resumeToken = opts.resumeToken;
     this.mode = opts.permissionMode;
+    this.model = opts.model || undefined;
+    this.effort = opts.effort;
   }
 
   async init(): Promise<void> {
     this.emitMode(this.mode);
+    this.emitModel();
     if (this.opts.initialPrompt) {
       this.sendText(this.opts.initialPrompt);
     } else {
@@ -127,6 +133,9 @@ export class ClaudeSession implements DriverSession {
         return;
       case 'set_permission_mode':
         await this.setPermissionMode(action.mode);
+        return;
+      case 'set_model':
+        await this.setModel(action.model, action.effort);
         return;
     }
   }
@@ -193,7 +202,8 @@ export class ClaudeSession implements DriverSession {
       // 実行中に full_auto（bypassPermissions）へ切り替えられるようにする。付けても、モードが変わるまでは確認する
       '--allow-dangerously-skip-permissions',
     ];
-    if (this.opts.model) args.push('--model', this.opts.model);
+    if (this.model) args.push('--model', this.model);
+    if (this.effort) args.push('--effort', this.effort);
     if (this.resumeToken) args.push('--resume', this.resumeToken);
 
     const env: NodeJS.ProcessEnv = { ...this.deps.env };
@@ -350,6 +360,55 @@ export class ClaudeSession implements DriverSession {
     } catch (e) {
       this.emit({ type: 'error', message: `権限モードを切り替えられませんでした: ${(e as Error).message}`, fatal: false });
     }
+  }
+
+  // ---- モデルとエフォート ----
+
+  private emitModel(): void {
+    const ev: DriverEvent = { type: 'model' };
+    if (this.model) ev.model = this.model;
+    if (this.effort) ev.effort = this.effort;
+    this.emit(ev);
+  }
+
+  /**
+   * モデルとエフォートを切り替える（undefined は変えない、null は CLI の既定に戻す）。
+   * プロセスが動いていれば制御要求で反映し（実行中のターンは次の API 呼び出しから効く）、
+   * 止まっていれば次の起動の --model / --effort に使う。
+   */
+  private async setModel(model: string | null | undefined, effort: EffortLevel | null | undefined): Promise<void> {
+    const nextModel = model === undefined ? this.model : model || undefined;
+    const nextEffort = effort === undefined ? this.effort : effort ?? undefined;
+    const errors: string[] = [];
+    if (nextModel !== this.model) {
+      if (this.proc) {
+        try {
+          // model を省くと CLI の既定に戻る
+          await this.sendControl(nextModel ? { subtype: 'set_model', model: nextModel } : { subtype: 'set_model' });
+          this.model = nextModel;
+        } catch (e) {
+          errors.push(`モデルを切り替えられませんでした: ${(e as Error).message}`);
+        }
+      } else {
+        this.model = nextModel;
+      }
+    }
+    if (nextEffort !== this.effort) {
+      if (this.proc) {
+        try {
+          // null で起動時の --effort も含めて既定に戻る
+          await this.sendControl({ subtype: 'apply_flag_settings', settings: { effortLevel: nextEffort ?? null } });
+          this.effort = nextEffort;
+        } catch (e) {
+          errors.push(`エフォートを切り替えられませんでした: ${(e as Error).message}`);
+        }
+      } else {
+        this.effort = nextEffort;
+      }
+    }
+    if (errors.length > 0) this.emit({ type: 'error', message: errors.join('\n'), fatal: false });
+    // 反映できた分を含む現在の設定を知らせる（何も変わらなくても、Web の切り替え中の表示を解くために送る）
+    this.emitModel();
   }
 
   // ---- ターン・プロセスの終わり ----
