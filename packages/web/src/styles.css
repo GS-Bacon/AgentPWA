@@ -169,6 +169,8 @@ kbd {
 .tool-line .ok { color: var(--running); }
 .tool-line .ng { color: var(--danger); }
 .tool-line .run { color: var(--attention); }
+/* ツール名と件数は縮めず折り返さない（狭いと1文字ずつ縦に並んでしまうため）。長い MCP のツール名だけは末尾を省く */
+.tool-line .tool-name { color: var(--fg); white-space: nowrap; flex-shrink: 0; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
 .tool-out { margin: 2px 0 4px 16px; max-height: 200px; }
 /* 続けて呼ばれたツールを1行にまとめた行（押すと1件ずつ開く） */
 .tool-group .chev { display: inline-flex; align-self: center; color: var(--fg-faint); transition: transform .1s; }

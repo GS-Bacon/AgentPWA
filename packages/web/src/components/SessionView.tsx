@@ -29,7 +29,7 @@ function ToolLine({ t, cwd, sessionId }: { t: ToolItem; cwd: string; sessionId: 
           style={file ? { flex: 'none' } : undefined}
         >
           {mark}
-          <span style={{ color: 'var(--fg)' }}>{t.name}</span>
+          <span className="tool-name">{t.name}</span>
           {!file && <span className="ellipsis">{relPath(t.summary, cwd)}</span>}
         </button>
         {/* 対象ファイルのあるツールは、要約のパスをタップするとビュワーで開く */}
@@ -68,7 +68,7 @@ function ToolGroup({ tools, cwd, sessionId }: { tools: ToolItem[]; cwd: string; 
             <IconChevron size={12} />
           </span>
           {runningTool ? <span className="run">…</span> : failed > 0 ? <span className="ng">✗</span> : <span className="ok">✓</span>}
-          <span style={{ color: 'var(--fg)' }}>ツール {tools.length}件</span>
+          <span className="tool-name">ツール {tools.length}件</span>
           <span className="ellipsis">
             {runningTool && !open ? `${runningTool.name} ${relPath(runningTool.summary, cwd)}` : toolCounts(tools)}
             {failed > 0 && !runningTool ? `（失敗 ${failed}）` : ''}
