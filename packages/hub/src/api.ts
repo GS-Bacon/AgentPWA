@@ -61,7 +61,10 @@ export interface SessionSummary {
   pendingQuestions: QuestionRequest[];
 }
 
-/** プロジェクト（作業フォルダ）。使う AI はプロジェクトごとに固定する */
+/**
+ * プロジェクト（作業フォルダと AI の組）。使う AI はプロジェクトごとに固定する。
+ * 同じフォルダを Claude と Codex の両方のプロジェクトとして登録できる（フォルダと AI の組で1つ）
+ */
 export interface FolderEntry {
   name: string;
   path: string;
@@ -80,6 +83,8 @@ export type ProjectColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blu
 /** PATCH /api/projects の本文。path のプロジェクトの設定を変える（いまは色だけ。null で色を外す） */
 export interface UpdateProjectRequest {
   path: string;
+  /** どの AI のプロジェクトか（同じフォルダを両方の AI で登録しているとき用。省くとそのフォルダの最初のプロジェクト） */
+  agent?: AgentKind;
   color: ProjectColor | null;
 }
 
@@ -135,13 +140,13 @@ export interface DirListing {
 export interface DirEntry {
   name: string;
   path: string;
-  /** すでにプロジェクトとして登録済みか */
-  registered: boolean;
+  /** このフォルダをプロジェクトとして登録済みの AI（AI ごとに1つずつ登録できる。未登録なら空） */
+  registeredAgents: AgentKind[];
 }
 
-/** PUT /api/projects/order の本文。登録済みのプロジェクトのパスを、すべて新しい順に並べる */
+/** PUT /api/projects/order の本文。登録済みのプロジェクト（フォルダと AI の組）を、すべて新しい順に並べる */
 export interface ReorderProjectsRequest {
-  paths: string[];
+  projects: { path: string; agent: AgentKind }[];
 }
 
 /**
@@ -162,7 +167,10 @@ export interface CreateProjectRequest {
 }
 
 export interface CreateSessionRequest {
-  /** 省略時はプロジェクトの AI。指定してプロジェクトの AI と違えば 400 */
+  /**
+   * どの AI のプロジェクトで始めるか（同じフォルダを両方の AI で登録しているとき用）。そのフォルダをこの AI で登録していなければ 403。
+   * 省略時は、作成元のセッションと同じ AI のプロジェクトがあればそれ、なければそのフォルダの最初のプロジェクト
+   */
   agent?: AgentKind;
   /** 許可リストのフォルダのパス（AI が作るときは省略でき、作成元のセッションと同じフォルダになる） */
   cwd: string;

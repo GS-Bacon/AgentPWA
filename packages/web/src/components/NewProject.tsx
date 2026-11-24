@@ -64,7 +64,9 @@ export function NewProjectForm({
 
   // いま見ているフォルダ（ルートの一覧を見ているときは未選択）
   const current = listing?.path;
-  const currentRegistered = current ? (info?.folders ?? []).some((f) => f.path.toLowerCase() === current.toLowerCase()) : false;
+  // 同じフォルダでも、別の AI のプロジェクトとしてなら登録できる（フォルダと AI の組で1つ）
+  const registeredAgentsOf = (p: string): AgentKind[] => (info?.folders ?? []).filter((f) => f.path.toLowerCase() === p.toLowerCase()).map((f) => f.agent);
+  const currentRegistered = current ? registeredAgentsOf(current).includes(agent) : false;
   const baseName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? p;
   const target = mode === 'existing' ? current : current && folderName.trim() ? `${current.replace(/[\\/]+$/, '')}${current.includes('\\') ? '\\' : '/'}${folderName.trim()}` : undefined;
   const ready = !!current && !busy && usable(agent) && (mode === 'existing' ? !currentRegistered : !!folderName.trim());
@@ -130,7 +132,14 @@ export function NewProjectForm({
             <span className={listing.path ? undefined : 'mono'} style={{ flex: '1 1 auto', minWidth: 0, fontSize: listing.path ? undefined : 12 }}>
               {e.name}
             </span>
-            {e.registered && <span className="muted" style={{ fontSize: 12, flex: 'none' }}>登録済み</span>}
+            {e.registeredAgents.length > 0 && (
+              <span className="muted" style={{ fontSize: 12, flex: 'none', display: 'flex', alignItems: 'center', gap: 4 }} title={e.registeredAgents.map((a) => AGENT_LABEL[a]).join('・') + ' で登録済み'}>
+                {e.registeredAgents.map((a) => (
+                  <AgentIcon key={a} agent={a} size={12} />
+                ))}
+                登録済み
+              </span>
+            )}
             <span className="muted" style={{ flex: 'none' }} aria-hidden>
               ›
             </span>
@@ -198,7 +207,9 @@ export function NewProjectForm({
             {target ? (
               <>
                 登録するフォルダ: <span className="mono">{target}</span>
-                {mode === 'existing' && currentRegistered && <span style={{ color: 'var(--danger)' }}>（登録済みです）</span>}
+                {mode === 'existing' && currentRegistered && (
+                  <span style={{ color: 'var(--danger)' }}>（{AGENT_LABEL[agent]} のプロジェクトとして登録済みです。別の AI なら登録できます）</span>
+                )}
               </>
             ) : mode === 'existing' ? (
               'ルートフォルダを開いて、登録するフォルダまで進んでください'

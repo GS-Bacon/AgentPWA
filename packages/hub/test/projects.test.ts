@@ -45,9 +45,9 @@ describe('フォルダの一覧', () => {
   it('サブフォルダを並べ、隠しフォルダは出さず、登録済みに印を付ける', async () => {
     const l = await listDirs(config, root);
     expect(l.parent).toBeUndefined();
-    expect(l.entries.map((e) => [e.name, e.registered])).toEqual([
-      ['alpha', true],
-      ['beta', false],
+    expect(l.entries.map((e) => [e.name, e.registeredAgents])).toEqual([
+      ['alpha', ['claude']],
+      ['beta', []],
     ]);
     const sub = await listDirs(config, path.join(root, 'beta'));
     expect(sub.parent).toBe(root);
@@ -112,10 +112,39 @@ describe('プロジェクトの作成', () => {
     expect(config.folders).toHaveLength(1);
   });
 
+  it('登録済みのフォルダでも、別の AI のプロジェクトとしてなら登録できる', async () => {
+    const a = path.join(root, 'alpha');
+    const f = await createProject(deps(), { mode: 'existing', path: a, agent: 'codex', name: 'alpha（Codex）' });
+    expect(f).toMatchObject({ path: a, agent: 'codex' });
+    expect(config.folders.map((x) => [x.path, x.agent])).toEqual([[a, 'claude'], [a, 'codex']]);
+    const l = await listDirs(config, root);
+    expect(l.entries.find((e) => e.name === 'alpha')?.registeredAgents).toEqual(['claude', 'codex']);
+    // 同じ AI では2つ目を登録できない
+    await expect(createProject(deps(), { mode: 'existing', path: a, agent: 'codex' })).rejects.toThrow('登録済み');
+    // 読み直しても両方残る
+    expect(loadConfig(configPath).config.folders.map((x) => x.agent)).toEqual(['claude', 'codex']);
+  });
+
   it('使えない AI と、許可なしの full_auto 既定は断る', async () => {
     await expect(createProject(deps(), { mode: 'existing', path: path.join(root, 'beta'), agent: 'claude', defaultPermissionMode: 'full_auto' })).rejects.toThrow('すべて自動');
     available = false;
     await expect(createProject(deps(), { mode: 'existing', path: path.join(root, 'beta'), agent: 'claude' })).rejects.toThrow('使えません');
+  });
+
+  it('同じフォルダの Claude と Codex のプロジェクトを別々に並べ替え・色付けできる', async () => {
+    const a = path.join(root, 'alpha');
+    await createProject(deps(), { mode: 'existing', path: a, agent: 'codex' });
+    await reorderProjects(deps(), [
+      { path: a, agent: 'codex' },
+      { path: a, agent: 'claude' },
+    ]);
+    expect(config.folders.map((f) => f.agent)).toEqual(['codex', 'claude']);
+    let raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(raw.folders.map((f: { agent?: string }) => f.agent)).toEqual(['codex', undefined]);
+    await updateProject(deps(), { path: a, agent: 'claude', color: 'red' });
+    expect(config.folders.map((f) => f.color)).toEqual([undefined, 'red']);
+    raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(raw.folders[1]).toEqual({ path: a, color: 'red' });
   });
 
   it('同時に作っても設定ファイルの書き足しが失われない', async () => {
@@ -135,7 +164,11 @@ describe('プロジェクトの並べ替え', () => {
     await createProject(deps(), { mode: 'new', path: root, folderName: 'p2', agent: 'claude' });
     const [a, p1, p2] = config.folders.map((f) => f.path);
     changed = 0;
-    const res = await reorderProjects(deps(), [p2, a + path.sep, p1]);
+    const res = await reorderProjects(deps(), [
+      { path: p2, agent: 'claude' },
+      { path: a + path.sep, agent: 'claude' },
+      { path: p1, agent: 'codex' },
+    ]);
     expect(res.map((f) => f.path)).toEqual([p2, a, p1]);
     expect(config.folders.map((f) => f.path)).toEqual([p2, a, p1]);
     expect(changed).toBe(1);
@@ -149,11 +182,14 @@ describe('プロジェクトの並べ替え', () => {
   it('過不足・重複・形の違う値は断る', async () => {
     await createProject(deps(), { mode: 'new', path: root, folderName: 'p1', agent: 'claude' });
     const [a, p1] = config.folders.map((f) => f.path);
-    await expect(reorderProjects(deps(), [a])).rejects.toThrow('一覧が変わっています');
-    await expect(reorderProjects(deps(), [a, a])).rejects.toThrow('一覧が変わっています');
-    await expect(reorderProjects(deps(), [p1, a, path.join(root, 'beta')])).rejects.toThrow('一覧が変わっています');
-    await expect(reorderProjects(deps(), 'x')).rejects.toThrow('paths');
-    await expect(reorderProjects(deps(), [1, 2])).rejects.toThrow('paths');
+    const c = (p: string, agent: 'claude' | 'codex' = 'claude') => ({ path: p, agent });
+    await expect(reorderProjects(deps(), [c(a)])).rejects.toThrow('一覧が変わっています');
+    await expect(reorderProjects(deps(), [c(a), c(a)])).rejects.toThrow('一覧が変わっています');
+    await expect(reorderProjects(deps(), [c(p1), c(a), c(path.join(root, 'beta'))])).rejects.toThrow('一覧が変わっています');
+    // AI が違えば別のプロジェクト
+    await expect(reorderProjects(deps(), [c(p1), c(a, 'codex')])).rejects.toThrow('一覧が変わっています');
+    await expect(reorderProjects(deps(), 'x')).rejects.toThrow('projects');
+    await expect(reorderProjects(deps(), [a, p1])).rejects.toThrow('projects');
     expect(config.folders.map((f) => f.path)).toEqual([a, p1]);
   });
 });

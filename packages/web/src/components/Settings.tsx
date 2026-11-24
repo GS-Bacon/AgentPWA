@@ -104,15 +104,15 @@ export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
           </button>
         </div>
         {(info?.folders ?? []).map((f, i, all) => (
-          <Row key={f.path} label={f.name}>
+          <Row key={`${f.agent}:${f.path}`} label={f.name}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: AGENT_COLOR[f.agent], fontSize: 13 }}>
               <AgentIcon agent={f.agent} /> {AGENT_LABEL[f.agent]}
               {/* 並び順（一覧の順。全端末で共有する） */}
               <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-                <button className="btn btn-icon-sm" aria-label={`${f.name} を上へ`} title="上へ" disabled={i === 0} onClick={() => moveProject(f.path, i - 1)}>
+                <button className="btn btn-icon-sm" aria-label={`${f.name} を上へ`} title="上へ" disabled={i === 0} onClick={() => moveProject(f, i - 1)}>
                   ↑
                 </button>
-                <button className="btn btn-icon-sm" aria-label={`${f.name} を下へ`} title="下へ" disabled={i === all.length - 1} onClick={() => moveProject(f.path, i + 1)}>
+                <button className="btn btn-icon-sm" aria-label={`${f.name} を下へ`} title="下へ" disabled={i === all.length - 1} onClick={() => moveProject(f, i + 1)}>
                   ↓
                 </button>
               </span>
@@ -122,7 +122,7 @@ export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
               既定の権限モード: {MODE_LABEL[f.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE]} ·{' '}
               {f.allowFullAuto ? <span style={{ color: 'var(--attention)' }}>「すべて自動」を許可</span> : '「すべて自動」は不可'}
             </span>
-            <ColorPalette name={f.name} value={f.color} onChange={(c) => setProjectColor(f.path, c)} />
+            <ColorPalette name={f.name} value={f.color} onChange={(c) => setProjectColor(f, c)} />
           </Row>
         ))}
         <p className="muted" style={{ padding: '10px 16px', fontSize: 12 }}>

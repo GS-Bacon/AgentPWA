@@ -74,7 +74,7 @@ Hub（状態遷移・並べ替え・既読・再起動後の再開・認証・�
 | `machineName` | 一覧に出すマシン名 | PC 名 |
 | `allowedUsers` | 許可する Tailscale ユーザー（`Tailscale-User-Login` の値） | `[]`（tailscale serve 経由はすべて拒否） |
 | `allowLocalhost` | このPCのブラウザから `127.0.0.1` で直接開くのを許すか | `true` |
-| `folders` | プロジェクト＝セッションを起動してよいフォルダ。`name`、絶対パスの `path`、使う AI の `agent`（`"claude"` / `"codex"`、省略時は `"claude"`）。パスは完全一致のみ。任意で `defaultPermissionMode`（新規セッションの既定の権限モード。`ask` / `auto_edit` / `auto` / `full_auto` / `plan`、省略時は `ask`）と `allowFullAuto`（「すべて自動」を許すか。省略時は `false`。`false` のプロジェクトでは Hub が `full_auto` を拒否する） | `[]` |
+| `folders` | プロジェクト＝セッションを起動してよいフォルダ。`name`、絶対パスの `path`、使う AI の `agent`（`"claude"` / `"codex"`、省略時は `"claude"`）。パスは完全一致のみ。同じ `path` を `agent` を変えて2つ書けば、同じフォルダを Claude と Codex の両方のプロジェクトにできる（同じ AI で2つは不可）。任意で `defaultPermissionMode`（新規セッションの既定の権限モード。`ask` / `auto_edit` / `auto` / `full_auto` / `plan`、省略時は `ask`）と `allowFullAuto`（「すべて自動」を許すか。省略時は `false`。`false` のプロジェクトでは Hub が `full_auto` を拒否する） | `[]` |
 | `projectRoots` | 画面（設定タブ・新規セッション）からプロジェクトを作ってよいルートフォルダ（絶対パスの配列）。この下のフォルダだけを選べ、新しいフォルダも作れる（`git init` も選べる）。シンボリックリンクを解決したうえで外に出ていないかを確かめる。作ったプロジェクトは Hub が `folders` に書き足す | `[]`（画面からは作れない） |
 | `claudePath` | `claude` CLI のパス | PATH と `~\.local\bin` を探す |
 | `codex` | `"fake"`（フィクスチャを流す表示確認用）か `"driver"`（`@agentpwa/driver-codex` を使う） | `"fake"` |

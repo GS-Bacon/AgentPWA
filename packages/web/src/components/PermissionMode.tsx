@@ -23,7 +23,7 @@ export interface PermissionSwitch {
 
 export function usePermissionSwitch(s: SessionSummary): PermissionSwitch {
   const info = useStore((st) => st.info);
-  const allowed = fullAutoAllowed(info, s.cwd);
+  const allowed = fullAutoAllowed(info, s);
   const [pending, setPending] = useState<PermissionMode | null>(null);
   const pendingRef = useRef<PermissionMode | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);

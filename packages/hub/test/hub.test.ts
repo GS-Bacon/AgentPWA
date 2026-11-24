@@ -98,11 +98,28 @@ describe('SessionManager', () => {
     store.close();
   });
 
-  it('AI はプロジェクトの設定で決まり、違う AI は指定できない', async () => {
+  it('AI はプロジェクトの設定で決まり、そのフォルダを登録していない AI は指定できない', async () => {
     const { manager, store } = setup();
     const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
     expect(s.agent).toBe('claude');
-    await expect(manager.create({ agent: 'claude', cwd: config.folders[1].path, permissionMode: 'ask' })).rejects.toThrow('codex 用');
+    await expect(manager.create({ agent: 'claude', cwd: config.folders[1].path, permissionMode: 'ask' })).rejects.toThrow('claude のプロジェクトとして登録されていません');
+    store.close();
+  });
+
+  it('同じフォルダを Claude と Codex の両方で登録すると、agent でどちらのプロジェクトか選べる', async () => {
+    const shared = path.join(dir, 'shared');
+    config.folders.push(
+      { name: 'shared-cx', path: shared, agent: 'codex' },
+      { name: 'shared', path: shared, agent: 'claude', allowFullAuto: true },
+    );
+    const { manager, store } = setup();
+    const s = await manager.create({ agent: 'claude', cwd: shared, permissionMode: 'full_auto' });
+    expect(s).toMatchObject({ agent: 'claude', folderName: 'shared', permissionMode: 'full_auto' });
+    // codex 側のプロジェクトは full_auto を許していない
+    await expect(manager.create({ agent: 'codex', cwd: shared, permissionMode: 'full_auto' })).rejects.toThrow();
+    // agent を省くと、作成元と同じ AI のプロジェクト
+    const child = await manager.create({ cwd: shared, permissionMode: 'ask' }, s.id);
+    expect(child).toMatchObject({ agent: 'claude', folderName: 'shared' });
     store.close();
   });
 
@@ -447,10 +464,19 @@ describe('設定ファイル', () => {
     const { config: c } = loadConfig(file);
     expect(c.folders[0]).toMatchObject({ agent: 'claude', allowFullAuto: false, defaultPermissionMode: 'auto' });
     expect(c.folders[1]).toMatchObject({ allowFullAuto: true, defaultPermissionMode: 'full_auto' });
-    expect(isModeAllowed(c, path.join(dir, 'a'), 'full_auto')).toBe(false);
-    expect(isModeAllowed(c, path.join(dir, 'a'), 'auto')).toBe(true);
-    expect(isModeAllowed(c, path.join(dir, 'b'), 'full_auto')).toBe(true);
-    expect(isModeAllowed(c, path.join(dir, 'other'), 'full_auto')).toBe(false);
+    expect(isModeAllowed(c, path.join(dir, 'a'), 'claude', 'full_auto')).toBe(false);
+    expect(isModeAllowed(c, path.join(dir, 'a'), 'claude', 'auto')).toBe(true);
+    expect(isModeAllowed(c, path.join(dir, 'b'), 'claude', 'full_auto')).toBe(true);
+    // 同じフォルダでも、別の AI のプロジェクト（ここでは未登録）では許さない
+    expect(isModeAllowed(c, path.join(dir, 'b'), 'codex', 'full_auto')).toBe(false);
+    expect(isModeAllowed(c, path.join(dir, 'other'), 'claude', 'full_auto')).toBe(false);
+  });
+
+  it('同じフォルダは AI ごとに1つまで登録できる', () => {
+    const ok = write([{ path: path.join(dir, 'a') }, { path: path.join(dir, 'a'), agent: 'codex' }]);
+    expect(loadConfig(ok).config.folders.map((f) => f.agent)).toEqual(['claude', 'codex']);
+    const dup = write([{ path: path.join(dir, 'a') }, { path: path.join(dir, 'a') + path.sep, agent: 'claude' }]);
+    expect(() => loadConfig(dup)).toThrow('同じフォルダと AI');
   });
 
   it('許可していないプロジェクトの既定を full_auto にはできない', () => {

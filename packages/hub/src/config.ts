@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type PermissionMode } from '@agentpwa/shared';
+import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type AgentKind, type PermissionMode } from '@agentpwa/shared';
 import type { FolderEntry, ProjectColor } from './api.ts';
 
 /** プロジェクトに付けられる色（api.ts の ProjectColor と同じ並び） */
@@ -86,6 +86,13 @@ function validate(c: HubConfig, file: string): HubConfig {
       errors.push(`defaultPermissionMode を 'full_auto' にするには allowFullAuto: true が必要です: ${label}`);
     }
   }
+  // 同じフォルダは AI ごとに1つまで（Claude と Codex で1つずつは登録できる）
+  const seen = new Set<string>();
+  for (const f of c.folders ?? []) {
+    const key = `${f.agent ?? 'claude'}|${norm(f.path)}`;
+    if (seen.has(key)) errors.push(`folders に同じフォルダと AI の組が2つあります: ${f.name ?? f.path}（${f.agent ?? 'claude'}）`);
+    seen.add(key);
+  }
   if (errors.length) throw new Error(`設定ファイル ${file} の誤り:\n- ${errors.join('\n- ')}`);
   // agent を省略したプロジェクトは Claude、full_auto は許さない、既定の権限モードは DEFAULT_PERMISSION_MODE（自動承認）とする
   c.folders = c.folders.map((f) => ({
@@ -120,19 +127,23 @@ function norm(p: string): string {
   return process.platform === 'win32' ? r.toLowerCase() : r;
 }
 
-/** 許可リストに入っているフォルダなら、その項目を返す（完全一致のみ。サブフォルダは不可）。 */
-export function findAllowedFolder(config: HubConfig, cwd: string): FolderEntry | undefined {
+/**
+ * 許可リストに入っているフォルダなら、その項目を返す（完全一致のみ。サブフォルダは不可）。
+ * 同じフォルダを Claude と Codex の両方のプロジェクトとして登録できるので、agent を渡すとその AI のプロジェクトだけを探す。
+ * agent を省くと、そのフォルダの最初のプロジェクト。
+ */
+export function findAllowedFolder(config: HubConfig, cwd: string, agent?: AgentKind): FolderEntry | undefined {
   const target = norm(cwd);
-  return config.folders.find((f) => norm(f.path) === target);
+  return config.folders.find((f) => norm(f.path) === target && (!agent || f.agent === agent));
 }
 
 /**
- * このフォルダのセッションで、その権限モードを使ってよいか。
- * full_auto は、許可リストで allowFullAuto: true にしたフォルダだけ。それ以外のモードは制限しない。
+ * このプロジェクト（フォルダと AI の組）のセッションで、その権限モードを使ってよいか。
+ * full_auto は、許可リストで allowFullAuto: true にしたプロジェクトだけ。それ以外のモードは制限しない。
  */
-export function isModeAllowed(config: HubConfig, cwd: string, mode: PermissionMode): boolean {
+export function isModeAllowed(config: HubConfig, cwd: string, agent: AgentKind, mode: PermissionMode): boolean {
   if (mode !== 'full_auto') return true;
-  return findAllowedFolder(config, cwd)?.allowFullAuto === true;
+  return findAllowedFolder(config, cwd, agent)?.allowFullAuto === true;
 }
 
 /**

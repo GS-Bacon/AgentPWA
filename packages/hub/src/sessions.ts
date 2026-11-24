@@ -164,7 +164,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     // full_auto の許可を外されたプロジェクトで動いているセッションは「毎回確認」に戻す
     for (const [id, s] of this.live) {
       const rec = this.records.get(id);
-      if (rec && !isModeAllowed(this.config, rec.cwd, rec.permissionMode)) {
+      if (rec && !isModeAllowed(this.config, rec.cwd, rec.agent, rec.permissionMode)) {
         s.send({ type: 'set_permission_mode', mode: 'ask' }).catch(() => {});
       }
     }
@@ -180,16 +180,22 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   async create(req: CreateSessionRequest, parentSessionId?: string): Promise<SessionSummary> {
     const parent = parentSessionId ? this.records.get(parentSessionId) : undefined;
     if (parentSessionId && !parent) throw new HttpError(400, '作成元のセッションが見つかりません');
-    const folder = findAllowedFolder(this.config, req.cwd || parent?.cwd || '');
-    if (!folder) throw new HttpError(403, 'このフォルダは許可リストに入っていません');
-    // AI はプロジェクト（作業フォルダ）ごとに設定ファイルで決めてある
+    const cwd = req.cwd || parent?.cwd || '';
+    // プロジェクトはフォルダと AI の組（同じフォルダを Claude と Codex の両方で登録できる）。
+    // agent を省いたときは、作成元と同じ AI のプロジェクトがあればそれ、なければそのフォルダの最初のプロジェクト
+    const folder = req.agent
+      ? findAllowedFolder(this.config, cwd, req.agent)
+      : ((parent && findAllowedFolder(this.config, cwd, parent.agent)) || findAllowedFolder(this.config, cwd));
+    if (!folder) {
+      if (req.agent && findAllowedFolder(this.config, cwd)) throw new HttpError(403, `このフォルダは ${req.agent} のプロジェクトとして登録されていません`);
+      throw new HttpError(403, 'このフォルダは許可リストに入っていません');
+    }
     const agent = folder.agent;
-    if (req.agent && req.agent !== agent) throw new HttpError(400, `このプロジェクトは ${agent} 用です`);
     const driver = this.drivers.get(agent);
     if (!driver) throw new HttpError(400, `${agent} の Driver がありません`);
     const permissionMode = req.permissionMode ?? folder.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE;
     if (!PERMISSION_MODES.includes(permissionMode)) throw new HttpError(400, '権限モードが正しくありません');
-    if (!isModeAllowed(this.config, folder.path, permissionMode)) throw new HttpError(403, FULL_AUTO_DENIED);
+    if (!isModeAllowed(this.config, folder.path, agent, permissionMode)) throw new HttpError(403, FULL_AUTO_DENIED);
     // AI が作るセッションは、作成元より確認を減らせない（「すべて自動」は作成元も「すべて自動」のときだけ）
     if (parent && permissionMode === 'full_auto' && parent.permissionMode !== 'full_auto') {
       throw new HttpError(403, '作成元のセッションが「すべて自動」でないため、「すべて自動」のセッションは作れません');
@@ -284,7 +290,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private async setPermissionMode(id: string, mode: PermissionMode): Promise<void> {
     const rec = this.mustGet(id);
     if (!PERMISSION_MODES.includes(mode)) throw new HttpError(400, '権限モードが正しくありません');
-    if (!isModeAllowed(this.config, rec.cwd, mode)) throw new HttpError(403, FULL_AUTO_DENIED);
+    if (!isModeAllowed(this.config, rec.cwd, rec.agent, mode)) throw new HttpError(403, FULL_AUTO_DENIED);
     let s = this.live.get(id);
     if (!s) {
       const pending = this.starting.get(id);
@@ -529,7 +535,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       }
       // 設定の変更で full_auto の許可が外れたプロジェクトでは、Driver に full_auto を渡さない
       let permissionMode = rec.permissionMode;
-      if (!isModeAllowed(this.config, rec.cwd, permissionMode)) {
+      if (!isModeAllowed(this.config, rec.cwd, rec.agent, permissionMode)) {
         permissionMode = 'ask';
         this.record(id, { type: 'error', message: '「すべて自動」はこのプロジェクトで許可されていないため、「毎回確認」で起動します', fatal: false });
         this.record(id, { type: 'permission_mode', mode: permissionMode });

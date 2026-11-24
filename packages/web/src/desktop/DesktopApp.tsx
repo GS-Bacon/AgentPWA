@@ -7,7 +7,7 @@ import { api } from '../lib/api.ts';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { discardIfEmpty, getState, isUnreadOrWaiting, needsAnswer, onSessionCreatedByAgent, onSessionsClosed, run, sortedSessions, useStore } from '../lib/store.ts';
 import { isRunning, projectHeadStyle } from '../lib/format.ts';
-import { useProjectColor } from '../lib/projects.ts';
+import { isFolder, useProjectColor, type ProjectRef } from '../lib/projects.ts';
 import type { ArchiveSectionProps } from '../App.tsx';
 import { DRAG_TYPE, isWaiting, Rail, Sidebar } from './Sidebar.tsx';
 import {
@@ -93,7 +93,7 @@ function PaneView({
 }) {
   const s = useStore((st) => (pane.sessionId ? st.sessions[pane.sessionId] : undefined));
   const sessions = useStore((st) => st.sessions);
-  const color = useProjectColor(s?.cwd);
+  const color = useProjectColor(s);
   const now = useNow();
   const [zone, setZone] = useState<DropZone | null>(null);
   const [dragKind, setDragKind] = useState<'pane' | 'session'>('pane');
@@ -364,7 +364,8 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const sessions = useStore((s) => s.sessions);
-  const [newSession, setNewSession] = useState<{ cwd?: string } | null>(null);
+  // 新しいセッションの画面。project は初めに選んでおくプロジェクト
+  const [newSession, setNewSession] = useState<{ project?: ProjectRef } | null>(null);
   const [settings, setSettings] = useState(false);
   const [maximized, setMaximized] = useState<string | null>(null);
   const isFinePointer = useMemo(() => window.matchMedia('(pointer: fine)').matches, []);
@@ -515,10 +516,10 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
 
   // プロジェクト横の＋: 画面を挟まずに、そのプロジェクトで（前回のモデルとエフォートで）始めてペインで開く
   const starting = useRef(false);
-  const startIn = async (cwd: string) => {
-    const folder = getState().info?.folders.find((f) => f.path === cwd);
+  const startIn = async (project: ProjectRef) => {
+    const folder = getState().info?.folders.find((f) => isFolder(f, project.path, project.agent));
     if (!folder) {
-      setNewSession({ cwd });
+      setNewSession({ project });
       return;
     }
     if (starting.current) return;
@@ -564,11 +565,12 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
       </header>
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', gap: 1 }}>
         {sidebarShown ? (
-          <Sidebar layout={layout} update={update} onNew={(cwd) => {
+          <Sidebar layout={layout} update={update} onNew={(project) => {
               // プロジェクトの指定がなければ、フォーカス中のペインのセッションのプロジェクトにする
               const sid = layout.panes.find((p) => p.id === layout.focused)?.sessionId;
-              setNewSession({ cwd: cwd ?? (sid ? sessions[sid]?.cwd : undefined) });
-            }} onStartIn={(cwd) => void startIn(cwd)} archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} onSettings={() => setSettings(true)} />
+              const s = sid ? sessions[sid] : undefined;
+              setNewSession({ project: project ?? (s ? { path: s.cwd, agent: s.agent } : undefined) });
+            }} onStartIn={(project) => void startIn(project)} archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} onSettings={() => setSettings(true)} />
         ) : (
           <Rail layout={layout} update={update} onSettings={() => setSettings(true)} />
         )}
@@ -582,7 +584,7 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
       </div>
       {newSession && (
         <NewSessionForm
-          cwd={newSession.cwd}
+          project={newSession.project}
           onClose={() => setNewSession(null)}
           onCreated={(s) => {
             setNewSession(null);

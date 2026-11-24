@@ -166,7 +166,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   app.get<{ Querystring: { path?: string } }>('/api/fs/dirs', async (req) => listDirs(config, req.query.path || undefined));
   app.post('/api/projects', async (req) => createProject(projectDeps, (req.body ?? {}) as Partial<CreateProjectRequest>));
   // プロジェクトの並び順（設定ファイルの folders の順）。登録済みのプロジェクトをすべて、新しい順で受け取る
-  app.put('/api/projects/order', async (req) => reorderProjects(projectDeps, (req.body as Partial<ReorderProjectsRequest> | undefined)?.paths));
+  app.put('/api/projects/order', async (req) => reorderProjects(projectDeps, (req.body as Partial<ReorderProjectsRequest> | undefined)?.projects));
   // プロジェクトの設定の変更（いまは色だけ。UpdateProjectRequest）
   app.patch('/api/projects', async (req) => updateProject(projectDeps, req.body));
 

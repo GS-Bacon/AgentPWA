@@ -316,13 +316,13 @@ export function askConfirm(opts: ConfirmOptions): Promise<boolean> {
 }
 
 /**
- * 登録済みのプロジェクト（path）を、folders の to 番目へ動かす。全端末で共有する（Hub が設定ファイルの順を入れ替える）。
+ * 登録済みのプロジェクト（フォルダと AI の組）を、folders の to 番目へ動かす。全端末で共有する（Hub が設定ファイルの順を入れ替える）。
  * 画面にはすぐ反映し、Hub が断ったら元に戻す。
  */
-export async function moveProject(path: string, to: number): Promise<void> {
+export async function moveProject(project: { path: string; agent: AgentKind }, to: number): Promise<void> {
   const info = state.info;
   if (!info) return;
-  const from = info.folders.findIndex((f) => f.path === path);
+  const from = info.folders.findIndex((f) => f.path === project.path && f.agent === project.agent);
   const target = Math.max(0, Math.min(to, info.folders.length - 1));
   if (from < 0 || from === target) return;
   const folders = [...info.folders];
@@ -330,7 +330,7 @@ export async function moveProject(path: string, to: number): Promise<void> {
   folders.splice(target, 0, moved);
   set({ info: { ...info, folders } });
   try {
-    await api.reorderProjects({ paths: folders.map((f) => f.path) });
+    await api.reorderProjects({ projects: folders.map((f) => ({ path: f.path, agent: f.agent })) });
   } catch (e) {
     // その間に Hub から新しい info が届いていれば、そちらを残す
     if (state.info?.folders === folders) set({ info: { ...state.info, folders: info.folders } });
@@ -338,18 +338,19 @@ export async function moveProject(path: string, to: number): Promise<void> {
   }
 }
 
-/** プロジェクト（path）の色を変える（null で外す）。全端末で共有する。画面にはすぐ反映し、Hub が断ったら元に戻す */
-export async function setProjectColor(path: string, color: ProjectColor | null): Promise<void> {
+/** プロジェクト（フォルダと AI の組）の色を変える（null で外す）。全端末で共有する。画面にはすぐ反映し、Hub が断ったら元に戻す */
+export async function setProjectColor(project: { path: string; agent: AgentKind }, color: ProjectColor | null): Promise<void> {
+  const { path, agent } = project;
   const info = state.info;
   if (!info) return;
   const folders = info.folders.map((f) => {
-    if (f.path !== path) return f;
+    if (f.path !== path || f.agent !== agent) return f;
     const { color: _old, ...rest } = f;
     return color ? { ...rest, color } : rest;
   });
   set({ info: { ...info, folders } });
   try {
-    await api.updateProject({ path, color });
+    await api.updateProject({ path, agent, color });
   } catch (e) {
     if (state.info?.folders === folders) set({ info: { ...state.info, folders: info.folders } });
     showToast((e as Error).message);

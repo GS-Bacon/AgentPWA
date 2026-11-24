@@ -6,7 +6,7 @@ import type { SessionSummary } from '@agentpwa/hub/api';
 import { discardIfEmpty, onSessionCreatedByAgent, onSessionsClosed, sortedSessions, useStore, waitingCount } from '../lib/store.ts';
 import type { ArchiveSectionProps } from '../App.tsx';
 import { elapsed, projectHeadStyle, shortPath, timeLabel } from '../lib/format.ts';
-import { archivedSessions, buildProjects, findProject, useProjectColor, type Project } from '../lib/projects.ts';
+import { archivedSessions, buildProjects, findProject, useProjectColor, type Project, type ProjectRef } from '../lib/projects.ts';
 import { archiveSession, deleteSession, setPinned, setUnread, unarchiveSession } from '../lib/sessionActions.ts';
 import { ApprovalInline, useNow } from '../components/Requests.tsx';
 import { AutoWarn, ConnState, PinMark, SessionMenu, ShowMoreButton, StatusLabel, useShowMore } from '../components/common.tsx';
@@ -22,7 +22,7 @@ type Route =
   | { name: 'settings' }
   | { name: 'session'; id: string }
   | { name: 'file'; id: string; path: string }
-  | { name: 'new'; cwd?: string };
+  | { name: 'new'; project?: ProjectRef };
 
 function parse(hash: string): Route {
   const [path, query = ''] = hash.replace(/^#/, '').split('?');
@@ -31,7 +31,12 @@ function parse(hash: string): Route {
   if (a === 's' && b) return { name: 'session', id: b };
   if (a === 'f' && b) return { name: 'file', id: b, path: new URLSearchParams(query).get('path') ?? '' };
   if (a === 'p' && b) return { name: 'list', project: decodeURIComponent(b) };
-  if (a === 'new') return { name: 'new', cwd: new URLSearchParams(query).get('cwd') ?? undefined };
+  if (a === 'new') {
+    const q = new URLSearchParams(query);
+    const cwd = q.get('cwd');
+    const agent = q.get('agent') === 'codex' ? 'codex' : 'claude';
+    return { name: 'new', project: cwd ? { path: cwd, agent } : undefined };
+  }
   return { name: 'list', project: null };
 }
 
@@ -287,7 +292,7 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
   const idle = rest.filter((s) => s.rank === 5);
   const idlePage = useShowMore(idle);
   const archivedPage = useShowMore(archived);
-  const newHash = project ? `#/new?cwd=${encodeURIComponent(project.path)}` : '#/new';
+  const newHash = project ? `#/new?cwd=${encodeURIComponent(project.path)}&agent=${project.agent}` : '#/new';
   const canCreate = !project || project.registered;
   return (
     <>
@@ -369,7 +374,7 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
 
 function DetailScreen({ id, back }: { id: string; back: () => void }) {
   const s = useStore((st) => st.sessions[id]);
-  const color = useProjectColor(s?.cwd);
+  const color = useProjectColor(s);
   const now = useNow();
   if (!s) {
     return (
@@ -486,7 +491,7 @@ export function PhoneApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProps)
     );
   }
   if (route.name === 'new') {
-    return <NewSessionForm cwd={route.cwd} fullscreen onClose={back} onCreated={(s) => go(`#/s/${s.id}`, true)} />;
+    return <NewSessionForm project={route.project} fullscreen onClose={back} onCreated={(s) => go(`#/s/${s.id}`, true)} />;
   }
   return (
     <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>

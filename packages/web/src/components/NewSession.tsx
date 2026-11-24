@@ -1,5 +1,5 @@
 // 新しいセッションの作成フォーム（iPhone は全画面、iPad / Web はダイアログ）。
-// プロジェクト（作業フォルダ）と AI を選んで始める。
+// プロジェクト（作業フォルダと AI の組）を選んで始める。同じフォルダの Claude と Codex のプロジェクトは別の行に出る。
 import { useState } from 'react';
 import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type AgentKind, type EffortLevel, type PermissionMode } from '@agentpwa/shared';
 import type { FolderEntry, SessionSummary } from '@agentpwa/hub/api';
@@ -8,12 +8,14 @@ import { showToast, useStore } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL, MODE_NOTE } from '../lib/format.ts';
 import { confirmFullAuto } from '../lib/sessionActions.ts';
 import { EFFORTS, EFFORT_LABEL, MODELS, defaultEffortLabel, defaultModelLabel, knownDefault, lastChoice, rememberChoice } from '../lib/models.ts';
+import { projectKey, type ProjectRef } from '../lib/projects.ts';
 import { AgentIcon, IconClose, IconPlus } from './Icons.tsx';
 import { NewProjectForm } from './NewProject.tsx';
 
 const LAST_KEY = 'agentpwa.newSession.v1';
 
-function loadLast(): { cwd?: string } {
+/** 前回セッションを始めたプロジェクト（agent が無いのは古い形。Claude とみなす） */
+function loadLast(): { cwd?: string; agent?: AgentKind } {
   try {
     return JSON.parse(localStorage.getItem(LAST_KEY) ?? '{}');
   } catch {
@@ -28,9 +30,9 @@ function loadLast(): { cwd?: string } {
 export async function startSessionIn(folder: FolderEntry): Promise<SessionSummary | null> {
   const c = lastChoice(folder.path, folder.agent);
   try {
-    const s = await api.create({ cwd: folder.path, model: c.model, effort: c.effort, permissionMode: folder.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE });
+    const s = await api.create({ cwd: folder.path, agent: folder.agent, model: c.model, effort: c.effort, permissionMode: folder.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE });
     try {
-      localStorage.setItem(LAST_KEY, JSON.stringify({ cwd: folder.path }));
+      localStorage.setItem(LAST_KEY, JSON.stringify({ cwd: folder.path, agent: folder.agent }));
     } catch {
       /* noop */
     }
@@ -42,12 +44,13 @@ export async function startSessionIn(folder: FolderEntry): Promise<SessionSummar
 }
 
 export function NewSessionForm({
-  cwd: initialCwd,
+  project: initial,
   onClose,
   onCreated,
   fullscreen,
 }: {
-  cwd?: string;
+  /** 初めに選んでおくプロジェクト。省くと前回のプロジェクト */
+  project?: ProjectRef;
   onClose: () => void;
   onCreated: (s: SessionSummary) => void;
   fullscreen?: boolean;
@@ -58,17 +61,22 @@ export function NewSessionForm({
   const [created, setCreated] = useState<FolderEntry | null>(null);
   const [addingProject, setAddingProject] = useState(false);
   const base = info?.folders ?? [];
-  const folders = created && !base.some((f) => f.path.toLowerCase() === created.path.toLowerCase()) ? [...base, created] : base;
-  const [cwd, setCwdState] = useState(() => {
-    const want = (initialCwd ?? last.cwd ?? '').toLowerCase();
-    return folders.find((f) => f.path.toLowerCase() === want)?.path ?? folders[0]?.path ?? '';
+  const keyOf = (f: FolderEntry) => projectKey(f.path, f.agent);
+  const folders = created && !base.some((f) => keyOf(f) === keyOf(created)) ? [...base, created] : base;
+  // 選んでいるプロジェクト（projectKey）
+  const [sel, setSel] = useState(() => {
+    const want = initial ?? (last.cwd ? { path: last.cwd, agent: last.agent ?? 'claude' } : undefined);
+    const k = want ? projectKey(want.path, want.agent) : '';
+    const f = folders.find((x) => keyOf(x) === k) ?? folders[0];
+    return f ? keyOf(f) : '';
   });
   // AI はプロジェクトごとに固定（Hub の設定ファイルの folders の agent）
-  const folder = folders.find((f) => f.path === cwd);
+  const folder = folders.find((f) => keyOf(f) === sel);
+  const cwd = folder?.path ?? '';
   const agent: AgentKind = folder?.agent ?? 'claude';
   const allowFullAuto = folder?.allowFullAuto === true;
   // 権限モードの既定はプロジェクトの設定（defaultPermissionMode）。なければ「毎回確認」
-  const defaultMode = (p: string): PermissionMode => folders.find((f) => f.path === p)?.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE;
+  const defaultMode = (f: FolderEntry | undefined): PermissionMode => f?.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE;
   // モデルとエフォートは、そのプロジェクトで前回選んだもの（空文字が「既定」）
   const [model, setModel] = useState(() => (cwd ? lastChoice(cwd, agent).model ?? '' : ''));
   const [effort, setEffort] = useState<EffortLevel | ''>(() => (cwd ? lastChoice(cwd, agent).effort ?? '' : ''));
@@ -77,16 +85,16 @@ export function NewSessionForm({
     setModel(c.model ?? '');
     setEffort(c.effort ?? '');
   };
-  const setCwd = (p: string) => {
-    setCwdState(p);
-    pickChoice(p, folders.find((f) => f.path === p)?.agent ?? 'claude');
-    setMode(defaultMode(p));
+  const select = (f: FolderEntry) => {
+    setSel(keyOf(f));
+    pickChoice(f.path, f.agent);
+    setMode(defaultMode(f));
   };
-  const [mode, setMode] = useState<PermissionMode>(() => defaultMode(cwd));
+  const [mode, setMode] = useState<PermissionMode>(() => defaultMode(folder));
   const onProjectCreated = (f: FolderEntry) => {
     setCreated(f);
     setAddingProject(false);
-    setCwdState(f.path);
+    setSel(keyOf(f));
     pickChoice(f.path, f.agent);
     setMode(f.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE);
   };
@@ -106,9 +114,9 @@ export function NewSessionForm({
     if (!cwd || busy) return;
     setBusy(true);
     try {
-      const s = await api.create({ cwd, model: model || undefined, effort: effort || undefined, permissionMode: mode, prompt: prompt.trim() || undefined });
+      const s = await api.create({ cwd, agent, model: model || undefined, effort: effort || undefined, permissionMode: mode, prompt: prompt.trim() || undefined });
       try {
-        localStorage.setItem(LAST_KEY, JSON.stringify({ cwd }));
+        localStorage.setItem(LAST_KEY, JSON.stringify({ cwd, agent }));
       } catch {
         /* noop */
       }
@@ -133,8 +141,8 @@ export function NewSessionForm({
             </p>
           )}
           {folders.map((f) => (
-            <label key={f.path} className={`choice${cwd === f.path ? ' checked' : ''}`}>
-              <input type="radio" name="dir" checked={cwd === f.path} onChange={() => setCwd(f.path)} />
+            <label key={keyOf(f)} className={`choice${sel === keyOf(f) ? ' checked' : ''}`}>
+              <input type="radio" name="dir" checked={sel === keyOf(f)} onChange={() => select(f)} />
               <span style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <AgentIcon agent={f.agent} />

@@ -65,10 +65,10 @@ export async function resolveInsideRoots(config: HubConfig, p: string): Promise<
 
 /** フォルダの中のサブフォルダを並べる。p を省くとルートフォルダの一覧 */
 export async function listDirs(config: HubConfig, p?: string): Promise<DirListing> {
-  const registered = (dir: string) => findAllowedFolder(config, dir) !== undefined;
+  const registered = (dir: string) => AGENTS.filter((a) => findAllowedFolder(config, dir, a) !== undefined);
   if (!p) {
     const roots = await realRoots(config);
-    return { entries: roots.map((r) => ({ name: r.root, path: r.real, registered: registered(r.real) })) };
+    return { entries: roots.map((r) => ({ name: r.root, path: r.real, registeredAgents: registered(r.real) })) };
   }
   const { real, root } = await resolveInsideRoots(config, p);
   let dirents: fs.Dirent[];
@@ -83,7 +83,7 @@ export async function listDirs(config: HubConfig, p?: string): Promise<DirListin
     .filter((d) => d.isDirectory() && !d.name.startsWith('.') && !d.name.startsWith('$'))
     .map((d) => {
       const full = path.join(real, d.name);
-      return { name: d.name, path: full, registered: registered(full) };
+      return { name: d.name, path: full, registeredAgents: registered(full) };
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   const parent = norm(root) !== norm(real) ? path.dirname(real) : undefined;
@@ -136,7 +136,7 @@ async function doCreate(deps: ProjectDeps, b: Partial<CreateProjectRequest>): Pr
     if (!validFolderName(folderName)) throw new HttpError(400, `フォルダ名に使えない文字が含まれています: ${folderName}`);
     const parent = (await resolveInsideRoots(config, b.path)).real;
     dir = path.join(parent, folderName);
-    if (findAllowedFolder(config, dir)) throw new HttpError(409, `すでに登録済みのプロジェクトです: ${dir}`);
+    if (findAllowedFolder(config, dir, b.agent)) throw new HttpError(409, `すでに ${b.agent} のプロジェクトとして登録済みです: ${dir}`);
     try {
       await fs.promises.mkdir(dir); // recursive にしない（既にあれば失敗させる）
     } catch (e) {
@@ -152,7 +152,8 @@ async function doCreate(deps: ProjectDeps, b: Partial<CreateProjectRequest>): Pr
       }
     }
   }
-  if (findAllowedFolder(config, dir)) throw new HttpError(409, `すでに登録済みのプロジェクトです: ${dir}`);
+  // 同じフォルダでも、別の AI のプロジェクトとしてなら登録できる
+  if (findAllowedFolder(config, dir, b.agent)) throw new HttpError(409, `すでに ${b.agent} のプロジェクトとして登録済みです: ${dir}`);
 
   const entry: FolderEntry = {
     name: b.name?.trim() || path.basename(dir),
@@ -181,22 +182,34 @@ export async function appendFolderToConfig(configPath: string, entry: FolderEntr
 
 /**
  * プロジェクトの並び順を変える（設定ファイルの folders の順を入れ替える）。
- * paths には登録済みのプロジェクトをすべて、新しい順に並べて渡す。過不足があれば（別の端末で増減したときなど）409 で断る。
+ * projects には登録済みのプロジェクト（フォルダと AI の組）をすべて、新しい順に並べて渡す。
+ * 過不足があれば（別の端末で増減したときなど）409 で断る。
  */
-export function reorderProjects(deps: ProjectDeps, paths: unknown): Promise<FolderEntry[]> {
-  const run = queue.then(() => doReorder(deps, paths));
+export function reorderProjects(deps: ProjectDeps, projects: unknown): Promise<FolderEntry[]> {
+  const run = queue.then(() => doReorder(deps, projects));
   queue = run.catch(() => undefined);
   return run;
 }
 
-/** 並べ替えでパスを突き合わせるときの形（末尾の区切りなどをそろえる） */
+/** パスを突き合わせるときの形（末尾の区切りなどをそろえる） */
 const pathKey = (p: string) => norm(path.resolve(p));
+/** プロジェクト（フォルダと AI の組）を突き合わせるときの形。設定ファイルで agent を省いたものは claude */
+const projectKey = (p: string, agent: unknown) => `${agent === 'codex' ? 'codex' : 'claude'}|${pathKey(p)}`;
+/** 設定ファイルの folders の生の項目のキー（パスが正しくなければ undefined） */
+function rawKey(item: unknown): string | undefined {
+  const it = item as { path?: unknown; agent?: unknown } | null;
+  return typeof it?.path === 'string' && path.isAbsolute(it.path) ? projectKey(it.path, it.agent) : undefined;
+}
 
-async function doReorder(deps: ProjectDeps, paths: unknown): Promise<FolderEntry[]> {
+async function doReorder(deps: ProjectDeps, projects: unknown): Promise<FolderEntry[]> {
   const { config } = deps;
-  if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'paths はフォルダのパスの配列にしてください');
-  const keys = paths.map((p: string) => pathKey(p));
-  const current = new Map(config.folders.map((f) => [pathKey(f.path), f]));
+  const ok = (x: unknown): x is { path: string; agent: AgentKind } => {
+    const o = x as { path?: unknown; agent?: unknown } | null;
+    return typeof o?.path === 'string' && path.isAbsolute(o.path) && AGENTS.includes(o.agent as AgentKind);
+  };
+  if (!Array.isArray(projects) || !projects.every(ok)) throw new HttpError(400, 'projects は { path, agent } の配列にしてください');
+  const keys = projects.map((p) => projectKey(p.path, p.agent));
+  const current = new Map(config.folders.map((f) => [projectKey(f.path, f.agent), f]));
   if (new Set(keys).size !== keys.length || keys.length !== current.size || !keys.every((k) => current.has(k))) {
     throw new HttpError(409, 'プロジェクトの一覧が変わっています。画面を読み直してから、もう一度並べ替えてください');
   }
@@ -204,8 +217,8 @@ async function doReorder(deps: ProjectDeps, paths: unknown): Promise<FolderEntry
   const items: unknown[] = Array.isArray(raw.folders) ? raw.folders : [];
   const rank = new Map(keys.map((k, i) => [k, i]));
   const rankOf = (item: unknown) => {
-    const p = (item as { path?: unknown } | null)?.path;
-    return typeof p === 'string' && path.isAbsolute(p) ? (rank.get(pathKey(p)) ?? keys.length) : keys.length;
+    const k = rawKey(item);
+    return k !== undefined ? (rank.get(k) ?? keys.length) : keys.length;
   };
   // 設定ファイルの各項目は書かれたまま（既定値を書き足さない）で、順だけ入れ替える。並べ替えは安定
   raw.folders = items
@@ -231,22 +244,22 @@ export function updateProject(deps: ProjectDeps, body: unknown): Promise<FolderE
 
 async function doUpdate(deps: ProjectDeps, body: unknown): Promise<FolderEntry> {
   const { config } = deps;
-  const b = (body ?? {}) as { path?: unknown; color?: unknown };
+  const b = (body ?? {}) as { path?: unknown; agent?: unknown; color?: unknown };
   if (typeof b.path !== 'string' || !path.isAbsolute(b.path)) throw new HttpError(400, 'プロジェクトのフォルダを絶対パスで指定してください');
+  if (b.agent !== undefined && !AGENTS.includes(b.agent as AgentKind)) throw new HttpError(400, 'agent が正しくありません');
   if (b.color !== null && !PROJECT_COLORS.includes(b.color as never)) {
     throw new HttpError(400, `色は ${PROJECT_COLORS.join(' / ')} のどれか（外すときは null）にしてください`);
   }
   const color = b.color as FolderEntry['color'] | null;
-  const key = pathKey(b.path);
-  const index = config.folders.findIndex((f) => pathKey(f.path) === key);
-  if (index < 0) throw new HttpError(404, `登録されていないプロジェクトです: ${b.path}`);
+  // agent を省いたときは、そのフォルダの最初のプロジェクト
+  const folder = findAllowedFolder(config, b.path, b.agent as AgentKind | undefined);
+  const index = folder ? config.folders.indexOf(folder) : -1;
+  if (!folder || index < 0) throw new HttpError(404, `登録されていないプロジェクトです: ${b.path}`);
+  const key = projectKey(folder.path, folder.agent);
 
   const raw = JSON.parse(await fs.promises.readFile(deps.configPath, 'utf8')) as Record<string, unknown>;
   const items: unknown[] = Array.isArray(raw.folders) ? raw.folders : [];
-  const item = items.find((it) => {
-    const p = (it as { path?: unknown } | null)?.path;
-    return typeof p === 'string' && path.isAbsolute(p) && pathKey(p) === key;
-  }) as Record<string, unknown> | undefined;
+  const item = items.find((it) => rawKey(it) === key) as Record<string, unknown> | undefined;
   if (!item) throw new HttpError(409, 'プロジェクトの一覧が変わっています。画面を読み直してから、もう一度変えてください');
   if (color) item.color = color;
   else delete item.color;

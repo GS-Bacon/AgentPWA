@@ -6,7 +6,7 @@ import type { SessionSummary } from '@agentpwa/hub/api';
 import { getState, moveProject, needsAnswer, useStore, waitingCount } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, elapsed } from '../lib/format.ts';
 import { openSessionInNewPane, type LayoutState } from '../lib/layout.ts';
-import { archivedSessions, buildProjects, type Project } from '../lib/projects.ts';
+import { archivedSessions, buildProjects, projectKey, type Project, type ProjectRef } from '../lib/projects.ts';
 import { useNow } from '../components/Requests.tsx';
 import { AutoWarn, ConnState, ContextMenu, PinMark, sessionMenuItems, ShowMoreButton, StatusLabel, UsageBars, useLongPress, useShowMore } from '../components/common.tsx';
 import { AgentIcon, IconGear, IconPlus, ProjectSwatch } from '../components/Icons.tsx';
@@ -16,16 +16,16 @@ export const DRAG_TYPE = 'application/x-agentpwa-session';
 const PROJECT_DRAG_TYPE = 'application/x-agentpwa-project';
 
 /**
- * ドラッグしたプロジェクト（from）を、target の前か後ろへ動かす。並び順は設定ファイルの folders の順（全端末で共有）。
+ * ドラッグしたプロジェクト（from。projectKey）を、target の前か後ろへ動かす。並び順は設定ファイルの folders の順（全端末で共有）。
  */
 function dropProject(from: string, target: string, after: boolean): void {
   const folders = getState().info?.folders ?? [];
-  const i = folders.findIndex((f) => f.path === from);
-  let to = folders.findIndex((f) => f.path === target);
+  const i = folders.findIndex((f) => projectKey(f.path, f.agent) === from);
+  let to = folders.findIndex((f) => projectKey(f.path, f.agent) === target);
   if (i < 0 || to < 0 || from === target) return;
   if (after) to++;
   if (i < to) to--;
-  void moveProject(from, to);
+  void moveProject(folders[i], to);
 }
 /** 確認待ち（許可・質問のカードが出ている）か */
 export const isWaiting = (id: string) => needsAnswer(getState().sessions[id]);
@@ -113,7 +113,7 @@ function ProjectGroup({
   p: Project;
   collapsed: boolean;
   toggle: () => void;
-  onNew: (cwd: string) => void;
+  onNew: (project: ProjectRef) => void;
   layout: LayoutState;
   update: Update;
   now: number;
@@ -131,7 +131,7 @@ function ProjectGroup({
       <div
         draggable={p.registered}
         onDragStart={(e) => {
-          e.dataTransfer.setData(PROJECT_DRAG_TYPE, p.path);
+          e.dataTransfer.setData(PROJECT_DRAG_TYPE, p.key);
           e.dataTransfer.effectAllowed = 'move';
         }}
         onDragOver={(e) => {
@@ -150,7 +150,7 @@ function ProjectGroup({
           const from = e.dataTransfer.getData(PROJECT_DRAG_TYPE);
           const r = e.currentTarget.getBoundingClientRect();
           setDropAt(null);
-          if (from) dropProject(from, p.path, e.clientY >= r.top + r.height / 2);
+          if (from) dropProject(from, p.key, e.clientY >= r.top + r.height / 2);
         }}
         onDragEnd={() => setDropAt(null)}
         title={p.registered ? 'ドラッグで並べ替え' : undefined}
@@ -179,7 +179,7 @@ function ProjectGroup({
         </button>
         {p.waiting > 0 && <span className="count">{p.waiting}</span>}
         {p.registered && (
-          <button className="btn btn-ghost btn-icon-sm" aria-label={`${p.name} で新しいセッション`} title="このプロジェクトで新しいセッション" onClick={() => onNew(p.path)}>
+          <button className="btn btn-ghost btn-icon-sm" aria-label={`${p.name} で新しいセッション`} title="このプロジェクトで新しいセッション" onClick={() => onNew(p)}>
             <IconPlus size={14} />
           </button>
         )}
@@ -211,9 +211,9 @@ export function Sidebar({
   layout: LayoutState;
   update: Update;
   /** 「＋ 新規」: 新しいセッションの画面を開く */
-  onNew: (cwd?: string) => void;
+  onNew: (project?: ProjectRef) => void;
   /** プロジェクト横の＋: 画面を挟まずにそのプロジェクトでセッションを始める */
-  onStartIn: (cwd: string) => void;
+  onStartIn: (project: ProjectRef) => void;
   archivedOpen: boolean;
   setArchivedOpen: (v: boolean) => void;
   onSettings: () => void;
