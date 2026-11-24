@@ -1,0 +1,193 @@
+// 新しいセッションの作成フォーム（iPhone は全画面、iPad / Web はダイアログ）。
+// プロジェクト（作業フォルダ）と AI を選んで始める。
+import { useState } from 'react';
+import type { AgentKind, PermissionMode } from '@agentpwa/shared';
+import type { SessionSummary } from '@agentpwa/hub/api';
+import { api } from '../lib/api.ts';
+import { showToast, useStore } from '../lib/store.ts';
+import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL } from '../lib/format.ts';
+import { AgentIcon, IconClose } from './Icons.tsx';
+
+const MODELS: Record<AgentKind, { value: string; label: string }[]> = {
+  claude: [
+    { value: '', label: '既定' },
+    { value: 'opus', label: 'Opus' },
+    { value: 'sonnet', label: 'Sonnet' },
+    { value: 'fable', label: 'Fable' },
+    { value: 'haiku', label: 'Haiku' },
+  ],
+  codex: [{ value: '', label: '既定' }],
+};
+
+const LAST_KEY = 'agentpwa.newSession.v1';
+
+function loadLast(): { cwd?: string; model?: string; mode?: PermissionMode } {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+export function NewSessionForm({
+  cwd: initialCwd,
+  onClose,
+  onCreated,
+  fullscreen,
+}: {
+  cwd?: string;
+  onClose: () => void;
+  onCreated: (s: SessionSummary) => void;
+  fullscreen?: boolean;
+}) {
+  const info = useStore((s) => s.info);
+  const last = loadLast();
+  const folders = info?.folders ?? [];
+  const [cwd, setCwdState] = useState(() => {
+    const want = (initialCwd ?? last.cwd ?? '').toLowerCase();
+    return folders.find((f) => f.path.toLowerCase() === want)?.path ?? folders[0]?.path ?? '';
+  });
+  // AI はプロジェクトごとに固定（Hub の設定ファイルの folders の agent）
+  const agent: AgentKind = folders.find((f) => f.path === cwd)?.agent ?? 'claude';
+  const [model, setModel] = useState(agent === 'claude' ? last.model ?? '' : '');
+  const setCwd = (p: string) => {
+    setCwdState(p);
+    const a = folders.find((f) => f.path === p)?.agent ?? 'claude';
+    if (!MODELS[a].some((m) => m.value === model)) setModel('');
+  };
+  const [mode, setMode] = useState<PermissionMode>(last.mode ?? 'ask');
+  const [prompt, setPrompt] = useState('');
+  const [busy, setBusy] = useState(false);
+  const auth = info?.agents[agent]?.auth;
+  const blocked = auth && !auth.ok;
+
+  const submit = async () => {
+    if (!cwd || busy) return;
+    setBusy(true);
+    try {
+      const s = await api.create({ cwd, model: model || undefined, permissionMode: mode, prompt: prompt.trim() || undefined });
+      try {
+        localStorage.setItem(LAST_KEY, JSON.stringify({ cwd, model, mode }));
+      } catch {
+        /* noop */
+      }
+      onCreated(s);
+    } catch (e) {
+      showToast((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const body = (
+    <>
+      {blocked && <div className="banner banner-error">{auth?.detail ?? '認証を確認できません'}</div>}
+      <fieldset className="form-section" style={{ margin: 0, padding: 0, border: 'none' }}>
+        <legend className="form-legend">プロジェクト（作業フォルダ）</legend>
+        <div style={{ borderTop: '1px solid var(--border)' }}>
+          {folders.length === 0 && (
+            <p className="muted" style={{ padding: '12px 16px', fontSize: 13, borderBottom: '1px solid var(--border)' }}>
+              作業フォルダが登録されていません。Hub の設定ファイル（<span className="mono">{info?.configPath}</span>）の folders に追加してください（保存すると Hub が読み直します）。
+            </p>
+          )}
+          {folders.map((f) => (
+            <label key={f.path} className={`choice${cwd === f.path ? ' checked' : ''}`}>
+              <input type="radio" name="dir" checked={cwd === f.path} onChange={() => setCwd(f.path)} />
+              <span style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <AgentIcon agent={f.agent} />
+                  {f.name}
+                </span>
+                <span className="mono muted ellipsis" style={{ fontSize: 11 }}>{f.path}</span>
+              </span>
+              <span style={{ fontSize: 12, color: AGENT_COLOR[f.agent], flex: 'none' }}>{AGENT_LABEL[f.agent]}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset className="form-section" style={{ margin: 0, padding: 0, border: 'none' }}>
+        <legend className="form-legend">マシン</legend>
+        <div style={{ borderTop: '1px solid var(--border)' }}>
+          <label className="choice checked">
+            <input type="radio" name="host" checked readOnly />
+            <span style={{ flex: '1 1 auto' }}>
+              {info?.machine ?? '—'} <span className="muted" style={{ fontSize: 12 }}>このPC</span>
+            </span>
+            <span className="st st-running" style={{ fontWeight: 500 }}>● オンライン</span>
+          </label>
+        </div>
+      </fieldset>
+      <div style={{ padding: '16px 16px 0', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+        <label className="field">
+          モデル
+          <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
+            {MODELS[agent].map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          権限モード
+          <select className="select" value={mode} onChange={(e) => setMode(e.target.value as PermissionMode)}>
+            {(Object.keys(MODE_LABEL) as PermissionMode[]).map((m) => (
+              <option key={m} value={m}>
+                {MODE_LABEL[m]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <label className="field" style={{ padding: '14px 16px 16px' }}>
+        最初の指示
+        <textarea
+          className="textarea"
+          rows={4}
+          placeholder="例: web/ に PWA の雛形を作って"
+          value={prompt}
+          style={{ fontSize: 16, fontWeight: 400, color: 'var(--fg)' }}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void submit();
+          }}
+        />
+      </label>
+    </>
+  );
+
+  const head = (
+    <div className="dialog-head" style={fullscreen ? { paddingTop: 'calc(10px + var(--safe-top))' } : undefined}>
+      <h2>新しいセッション</h2>
+      <button className="btn btn-ghost btn-icon" aria-label="閉じる" onClick={onClose} style={{ width: 44, height: 44 }}>
+        <IconClose size={18} />
+      </button>
+    </div>
+  );
+  const foot = (
+    <div className="dialog-foot" style={fullscreen ? { paddingBottom: 'calc(12px + var(--safe-bottom))' } : undefined}>
+      <button className="btn btn-primary btn-lg" style={{ flex: fullscreen ? 1 : undefined }} disabled={!cwd || busy || blocked} onClick={submit}>
+        {busy ? '起動中…' : 'セッションを開始'}
+      </button>
+    </div>
+  );
+
+  if (fullscreen) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', zIndex: 30 }}>
+        {head}
+        <div className="dialog-body">{body}</div>
+        {foot}
+      </div>
+    );
+  }
+  return (
+    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog" role="dialog" aria-modal="true" aria-label="新しいセッション">
+        {head}
+        <div className="dialog-body">{body}</div>
+        {foot}
+      </div>
+    </div>
+  );
+}

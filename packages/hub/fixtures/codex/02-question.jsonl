@@ -1,0 +1,16 @@
+{"type":"status","status":"starting"}
+{"type":"resume_token","token":"fake-thread-question"}
+{"type":"message","messageId":"u1","role":"user","text":"CI が落ちている原因を調べて直して"}
+{"type":"status","status":"running"}
+{"type":"tool","toolId":"c1","name":"shell","summary":"gh run view --log-failed","state":"running"}
+{"type":"tool","toolId":"c1","name":"shell","summary":"gh run view --log-failed","state":"done","output":"FAIL test/e2e/login.spec.ts\n  ● ログイン後にダッシュボードへ移動する\n    Timeout 5000ms exceeded"}
+{"type":"message","messageId":"a1","role":"assistant","text":"E2E テストのタイムアウトが原因です。CI ランナーが遅いため、待ち時間を延ばすか、テストを分割する必要があります。"}
+{"type":"question","requestId":"q1","prompt":"どちらの方法で直しますか？","options":["タイムアウトを 15 秒に延ばす","テストを2つに分割する"]}
+{"type":"status","status":"waiting_input"}
+{"type":"question_resolved","requestId":"q1"}
+{"type":"status","status":"running"}
+{"type":"tool","toolId":"c2","name":"apply_patch","summary":"test/e2e/login.spec.ts +3 −1","state":"done"}
+{"type":"tool","toolId":"c3","name":"shell","summary":"npx playwright test login","state":"running"}
+{"type":"tool","toolId":"c3","name":"shell","summary":"npx playwright test login","state":"done","output":"1 passed (9.8s)"}
+{"type":"message","messageId":"a2","role":"assistant","text":"修正しました。ローカルで `login.spec.ts` が通ることを確認しています。"}
+{"type":"status","status":"idle"}

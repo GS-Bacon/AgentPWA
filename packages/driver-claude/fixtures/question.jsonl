@@ -1,0 +1,20 @@
+{"type":"message","messageId":"u-mwu3p2wn-0","role":"user","text":"Use the AskUserQuestion tool to ask me which port to publish on (options: 443, 8443). Then reply with one sentence confirming my choice."}
+{"type":"status","status":"running"}
+{"type":"resume_token","token":"fb515666-e252-479c-bc1d-4553bec9bf85"}
+{"type":"tool","toolId":"toolu_01BQ9n2zPGLNoKSiTkrXjRy7","name":"AskUserQuestion","summary":"{\"questions\":[{\"question\":\"Which port should be published?\",\"header\":\"Port\",\"multiSelect\":false,\"options\":[{\"label\":\"...","state":"running"}
+{"type":"usage","label":"セッション枠（5時間）","percent":25,"resetsAt":"2026-11-24T05:20:00.000Z"}
+{"type":"usage","label":"週間","percent":6,"resetsAt":"2026-11-29T06:00:00.000Z"}
+{"type":"question","requestId":"toolu_01BQ9n2zPGLNoKSiTkrXjRy7","prompt":"Which port should be published?","options":["443","8443"]}
+{"type":"status","status":"waiting_input"}
+{"type":"question_resolved","requestId":"toolu_01BQ9n2zPGLNoKSiTkrXjRy7"}
+{"type":"status","status":"running"}
+{"type":"tool","toolId":"toolu_01BQ9n2zPGLNoKSiTkrXjRy7","name":"AskUserQuestion","summary":"{\"questions\":[{\"question\":\"Which port should be published?\",\"header\":\"Port\",\"multiSelect\":false,\"options\":[{\"label\":\"...","state":"done","output":"Your questions have been answered: \"Which port should be published?\"=\"443\". You can now continue with these answers in mind."}
+{"type":"message_delta","messageId":"msg_011ChLzqKoTAtkFyARcTymun:0","text":"You ch"}
+{"type":"message_delta","messageId":"msg_011ChLzqKoTAtkFyARcTymun:0","text":"ose port 443 "}
+{"type":"message_delta","messageId":"msg_011ChLzqKoTAtkFyARcTymun:0","text":"as"}
+{"type":"message_delta","messageId":"msg_011ChLzqKoTAtkFyARcTymun:0","text":" the port"}
+{"type":"message_delta","messageId":"msg_011ChLzqKoTAtkFyARcTymun:0","text":" to publish on"}
+{"type":"message_delta","messageId":"msg_011ChLzqKoTAtkFyARcTymun:0","text":"."}
+{"type":"message","messageId":"msg_011ChLzqKoTAtkFyARcTymun:0","role":"assistant","text":"You chose port 443 as the port to publish on."}
+{"type":"status","status":"idle"}
+{"type":"status","status":"stopped"}

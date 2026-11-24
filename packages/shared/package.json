@@ -1,0 +1,11 @@
+{
+  "name": "@agentpwa/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentPWA の共通プロトコル（Hub / Driver / Web の契約）",
+  "exports": {
+    ".": "./src/protocol.ts"
+  },
+  "types": "./src/protocol.ts"
+}

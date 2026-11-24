@@ -1,0 +1,19 @@
+{"type":"message","messageId":"u-mwu3opy2-0","role":"user","text":"Create a file notes.txt containing the line 'hello from AgentPWA' with the Write tool, then reply with one short sentence."}
+{"type":"status","status":"running"}
+{"type":"resume_token","token":"0d592848-98a0-4404-a52a-0bfdde438937"}
+{"type":"tool","toolId":"toolu_012n85rcbmCKxgbKvAJsPw15","name":"Write","summary":"C:\\work\\demo\\notes.txt +2","state":"running"}
+{"type":"usage","label":"セッション枠（5時間）","percent":25,"resetsAt":"2026-11-24T05:20:00.000Z"}
+{"type":"usage","label":"週間","percent":6,"resetsAt":"2026-11-29T06:00:00.000Z"}
+{"type":"approval_request","requestId":"toolu_012n85rcbmCKxgbKvAJsPw15","kind":"file_change","title":"ファイル変更の許可","cwd":"C:/work/demo","changes":[{"path":"C:\\work\\demo\\notes.txt","kind":"add","additions":2,"deletions":0,"diff":"--- a/C:\\work\\demo\\notes.txt\n+++ b/C:\\work\\demo\\notes.txt\n+hello from AgentPWA\n+"}],"choices":["allow","allow_session","deny"]}
+{"type":"status","status":"waiting_approval"}
+{"type":"approval_resolved","requestId":"toolu_012n85rcbmCKxgbKvAJsPw15","decision":"allow"}
+{"type":"status","status":"running"}
+{"type":"tool","toolId":"toolu_012n85rcbmCKxgbKvAJsPw15","name":"Write","summary":"C:\\work\\demo\\notes.txt +2","state":"done","output":"File created successfully at: C:\\work\\demo\\notes.txt (file state is current in your context — no need to Read it back)"}
+{"type":"message_delta","messageId":"msg_011ChLzp19WrYJxJ7ZxgVRwN:0","text":"I created `notes.txt"}
+{"type":"message_delta","messageId":"msg_011ChLzp19WrYJxJ7ZxgVRwN:0","text":"` in"}
+{"type":"message_delta","messageId":"msg_011ChLzp19WrYJxJ7ZxgVRwN:0","text":" the working directory with the line \""}
+{"type":"message_delta","messageId":"msg_011ChLzp19WrYJxJ7ZxgVRwN:0","text":"hello from AgentPW"}
+{"type":"message_delta","messageId":"msg_011ChLzp19WrYJxJ7ZxgVRwN:0","text":"A\"."}
+{"type":"message","messageId":"msg_011ChLzp19WrYJxJ7ZxgVRwN:0","role":"assistant","text":"I created `notes.txt` in the working directory with the line \"hello from AgentPWA\"."}
+{"type":"status","status":"idle"}
+{"type":"status","status":"stopped"}

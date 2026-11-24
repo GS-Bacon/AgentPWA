@@ -1,0 +1,27 @@
+{
+  "name": "@agentpwa/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentPWA の PWA（React + Vite）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@agentpwa/shared": "*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.0.0",
+    "remark-gfm": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "vite": "^7.0.0",
+    "vite-plugin-pwa": "^1.0.0",
+    "@agentpwa/hub": "*"
+  }
+}
