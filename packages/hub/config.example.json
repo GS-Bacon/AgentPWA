@@ -3,6 +3,7 @@
   "machineName": "laptop",
   "allowedUsers": ["you@example.com"],
   "allowLocalhost": true,
+  "projectRoots": ["C:\\Users\\you\\work", "C:\\Users\\you\\Documents"],
   "folders": [
     { "name": "AgentPWA", "path": "C:\\Users\\you\\Documents\\AgentPWA", "agent": "claude", "defaultPermissionMode": "auto_edit" },
     { "name": "sandbox", "path": "C:\\Users\\you\\work\\sandbox", "agent": "claude", "allowFullAuto": true },

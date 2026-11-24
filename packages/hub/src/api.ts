@@ -70,6 +70,41 @@ export interface HubInfo {
   usage: Record<AgentKind, UsageInfo[]>;
   configPath: string;
   protocolVersion: number;
+  /** 画面からプロジェクトを作ってよいルートフォルダ（設定ファイルの projectRoots）。空なら作れない */
+  projectRoots: string[];
+}
+
+/** GET /api/fs/dirs?path= の応答。path を省くとルートフォルダの一覧を返す */
+export interface DirListing {
+  /** 見ているフォルダ（ルートの一覧のときは undefined） */
+  path?: string;
+  /** 一つ上のフォルダ。ルートフォルダそのものを見ているときは undefined（ルートの一覧に戻る） */
+  parent?: string;
+  entries: DirEntry[];
+}
+
+export interface DirEntry {
+  name: string;
+  path: string;
+  /** すでにプロジェクトとして登録済みか */
+  registered: boolean;
+}
+
+/**
+ * POST /api/projects の本文。作ったプロジェクトは設定ファイルの folders に書き足す。
+ * - existing: 既存のフォルダ（path）をそのまま登録する
+ * - new: 親フォルダ（path）の下に folderName のフォルダを作って登録する。gitInit で git init もする
+ */
+export interface CreateProjectRequest {
+  mode: 'existing' | 'new';
+  path: string;
+  folderName?: string;
+  gitInit?: boolean;
+  /** 表示名。省略時はフォルダ名 */
+  name?: string;
+  agent: AgentKind;
+  allowFullAuto?: boolean;
+  defaultPermissionMode?: PermissionMode;
 }
 
 export interface CreateSessionRequest {
