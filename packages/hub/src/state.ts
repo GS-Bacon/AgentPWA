@@ -102,6 +102,10 @@ export function applyEvent(rec: SessionRecord, ev: SessionEvent): SessionRecord 
     case 'resume_token':
       r.resumeToken = ev.token;
       break;
+    case 'permission_mode':
+      // Driver が報告した「現在のモード」。次に起動・再開するときもこの値を渡す
+      r.permissionMode = ev.mode;
+      break;
     case 'tool':
       r.activity = oneLine(`${ev.name} ${ev.summary}`);
       break;

@@ -4,7 +4,8 @@
   "allowedUsers": ["you@example.com"],
   "allowLocalhost": true,
   "folders": [
-    { "name": "AgentPWA", "path": "C:\\Users\\you\\Documents\\AgentPWA", "agent": "claude" },
+    { "name": "AgentPWA", "path": "C:\\Users\\you\\Documents\\AgentPWA", "agent": "claude", "defaultPermissionMode": "auto_edit" },
+    { "name": "sandbox", "path": "C:\\Users\\you\\work\\sandbox", "agent": "claude", "allowFullAuto": true },
     { "name": "services-api", "path": "C:\\Users\\you\\work\\services-api", "agent": "codex" }
   ],
   "claudePath": "C:\\Users\\you\\.local\\bin\\claude.exe",

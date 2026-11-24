@@ -50,6 +50,11 @@ class FakeSession implements DriverSession {
 
   async send(action: UserAction): Promise<void> {
     if (this.stopped) throw new Error('セッションは終了しています');
+    if (action.type === 'set_permission_mode') {
+      // どの状態でも受け付け、すぐに反映したことにする
+      this.emit({ type: 'permission_mode', mode: action.mode });
+      return;
+    }
     if (action.type === 'interrupt') {
       this.cancelled = true;
       this.waiter?.resolve(action);
@@ -180,11 +185,18 @@ class FakeSession implements DriverSession {
   }
 }
 
-export function createFakeDriver(options: FakeDriverOptions): AgentDriver {
+export interface FakeDriver extends AgentDriver {
+  /** deleteHistory が呼ばれた記録（テストと表示確認用。実際には何も消さない） */
+  readonly deletedHistories: { cwd: string; resumeToken: string }[];
+}
+
+export function createFakeDriver(options: FakeDriverOptions): FakeDriver {
   let counter = 0;
   const delayMs = options.delayMs ?? 600;
+  const deletedHistories: { cwd: string; resumeToken: string }[] = [];
   return {
     kind: options.kind,
+    deletedHistories,
     async checkAuth() {
       const n = listFixtures(options.fixturesDir).length;
       return {
@@ -202,8 +214,13 @@ export function createFakeDriver(options: FakeDriverOptions): AgentDriver {
         ? ([{ type: 'status', status: 'idle' }] as DriverEvent[])
         : loadFixture(files[counter++ % files.length]);
       const s = new FakeSession(events, opts, emit, delayMs);
+      // 起動したら、使っている権限モードを知らせる（docs/protocol.md 3.1）
+      emit({ type: 'permission_mode', mode: opts.permissionMode });
       s.run();
       return s;
+    },
+    async deleteHistory(target) {
+      deletedHistories.push(target);
     },
   };
 }

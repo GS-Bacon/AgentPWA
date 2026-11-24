@@ -80,6 +80,15 @@ describe('状態遷移', () => {
     expect(r.resumeToken).toBe('abc');
   });
 
+  it('permission_mode を現在の権限モードにする', () => {
+    let r = play(rec(), [{ type: 'permission_mode', mode: 'plan' }]);
+    expect(r.permissionMode).toBe('plan');
+    r = play(r, [{ type: 'error', message: '切り替えられません', fatal: false }], 2);
+    expect(r.permissionMode).toBe('plan');
+    r = play(r, [{ type: 'permission_mode', mode: 'auto' }], 3);
+    expect(r.permissionMode).toBe('auto');
+  });
+
   it('状態が変わらない status では statusSince を変えない', () => {
     const r1 = play(rec(), [{ type: 'status', status: 'running' }]);
     const r2 = play(r1, [{ type: 'status', status: 'running' }], 10);

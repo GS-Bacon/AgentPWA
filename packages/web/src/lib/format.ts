@@ -1,5 +1,5 @@
 // 表示用の小さな関数
-import type { AgentKind, PermissionMode } from '@agentpwa/shared';
+import { PERMISSION_MODES, type AgentKind, type PermissionMode } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 
 export const AGENT_LABEL: Record<AgentKind, string> = { claude: 'Claude', codex: 'Codex' };
@@ -8,8 +8,27 @@ export const AGENT_COLOR: Record<AgentKind, string> = { claude: 'var(--claude)',
 export const MODE_LABEL: Record<PermissionMode, string> = {
   ask: '毎回確認',
   auto_edit: '編集は自動',
-  plan: 'プランのみ',
+  auto: '自動承認',
+  full_auto: 'すべて自動',
+  plan: '計画のみ',
 };
+
+/** 権限モードの説明（メニューと新規セッションの画面で添える） */
+export const MODE_NOTE: Partial<Record<PermissionMode, string>> = {
+  auto: '安全と判定した操作は確認せずに実行します',
+  full_auto: 'すべての操作を確認せずに実行します',
+};
+
+/** Shift+Tab で次に切り替えるモード（PERMISSION_MODES の順。確認が要る full_auto は巡回に入れない） */
+export function nextCycleMode(current: PermissionMode): PermissionMode {
+  const n = PERMISSION_MODES.length;
+  const i = PERMISSION_MODES.indexOf(current);
+  for (let k = 1; k <= n; k++) {
+    const m = PERMISSION_MODES[(i + k + n) % n];
+    if (m !== 'full_auto') return m;
+  }
+  return current;
+}
 
 export interface StatusView {
   label: string;

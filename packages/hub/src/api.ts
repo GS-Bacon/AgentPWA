@@ -20,6 +20,7 @@ export interface SessionSummary {
   folderName: string;
   machine: string;
   model?: string;
+  /** 現在の権限モード（Driver が送る permission_mode の値） */
   permissionMode: PermissionMode;
   status: SessionStatus;
   statusReason?: string;
@@ -48,6 +49,10 @@ export interface FolderEntry {
   name: string;
   path: string;
   agent: AgentKind;
+  /** 「すべて自動」（full_auto）を許すか。省略時は false（Hub が読み込み時に補う） */
+  allowFullAuto?: boolean;
+  /** 新しいセッションの既定の権限モード。省略時は 'ask'（Hub が読み込み時に補う） */
+  defaultPermissionMode?: PermissionMode;
 }
 
 export interface AgentInfo {
@@ -73,15 +78,31 @@ export interface CreateSessionRequest {
   /** 許可リストのフォルダのパス */
   cwd: string;
   model?: string;
-  permissionMode: PermissionMode;
+  /** 省略時はプロジェクトの既定（defaultPermissionMode、なければ 'ask'）。full_auto は許可したプロジェクトだけ */
+  permissionMode?: PermissionMode;
   prompt?: string;
   title?: string;
+}
+
+/** PATCH /api/sessions/:id の本文。archived を変えるとき、動いているセッションは先に止める */
+export interface UpdateSessionRequest {
+  title?: string;
+  archived?: boolean;
+}
+
+/** DELETE /api/sessions/:id の応答 */
+export interface DeleteSessionResult {
+  ok: true;
+  /** エージェント側の履歴（deleteHistory）を消せなかったときの理由。Hub の記録は消えている */
+  historyError?: string;
 }
 
 /** WebSocket で Hub から Web へ送るメッセージ */
 export type ServerMessage =
   | { type: 'hello'; sessions: SessionSummary[]; info: HubInfo }
   | { type: 'session'; session: SessionSummary }
+  /** セッションを削除したとき（各端末はペインを閉じ、件数を数え直す） */
+  | { type: 'session_removed'; sessionId: string }
   | { type: 'event'; event: SessionEvent }
   | { type: 'usage'; agent: AgentKind; usage: UsageInfo[] }
   /** 設定ファイルが読み直されたとき */

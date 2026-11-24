@@ -14,7 +14,30 @@ export interface State {
   /** 読み込み済みのセッションのイベント（seq 順） */
   events: Record<string, SessionEvent[]>;
   usage: Record<AgentKind, UsageInfo[]>;
-  toast: string | null;
+  toast: Toast | null;
+  /** 表示中の確認ダイアログ */
+  confirm: ConfirmRequest | null;
+}
+
+/** 画面下の通知。action があれば「元に戻す」などのボタンを添える */
+export interface Toast {
+  id: number;
+  text: string;
+  tone: 'error' | 'info';
+  action?: { label: string; run: () => void };
+}
+
+export interface ConfirmOptions {
+  title: string;
+  /** 本文（1要素1段落） */
+  body: string[];
+  confirmLabel: string;
+  /** 確定ボタンの文字をエラー色にする（削除など） */
+  danger?: boolean;
+}
+
+export interface ConfirmRequest extends ConfirmOptions {
+  resolve: (ok: boolean) => void;
 }
 
 let state: State = {
@@ -25,6 +48,7 @@ let state: State = {
   events: {},
   usage: { claude: [], codex: [] },
   toast: null,
+  confirm: null,
 };
 
 const listeners = new Set<() => void>();
@@ -79,7 +103,8 @@ export function loadEvents(id: string): Promise<void> {
       if (!state.events[id]) set((s) => ({ events: { ...s.events, [id]: [] } }));
       mergeEvents(id, evs);
     } catch (e) {
-      showToast(`履歴を読み込めませんでした: ${(e as Error).message}`);
+      // 削除されたセッションは黙って捨てる
+      if (state.sessions[id]) showToast(`履歴を読み込めませんでした: ${(e as Error).message}`);
     } finally {
       loading.delete(id);
     }
@@ -93,19 +118,60 @@ export function loadEvents(id: string): Promise<void> {
 let ws: WebSocket | null = null;
 let retry = 0;
 
+// ---- アーカイブ・削除で閉じたセッション ----
+// 一覧から外れた（アーカイブした・削除した）セッションを知らせる。ペインを閉じる・詳細画面から戻るのに使う。
+// どの端末で操作しても、Hub の配信で全端末に届く。
+
+const closeListeners = new Set<(ids: string[]) => void>();
+
+export function onSessionsClosed(cb: (ids: string[]) => void): () => void {
+  closeListeners.add(cb);
+  return () => closeListeners.delete(cb);
+}
+
+function notifyClosed(ids: string[]): void {
+  if (ids.length === 0) return;
+  for (const l of closeListeners) l(ids);
+}
+
 function onMessage(m: ServerMessage): void {
   switch (m.type) {
     case 'hello': {
       const sessions: Record<string, SessionSummary> = {};
       for (const s of m.sessions) sessions[s.id] = s;
-      set({ sessions, info: m.info, usage: m.info.usage, connected: true, ready: true });
+      // 再接続時: 切れている間にアーカイブ・削除されたセッションも閉じる
+      const closed = state.ready
+        ? Object.values(state.sessions)
+            .filter((s) => !s.archived && (!sessions[s.id] || sessions[s.id].archived))
+            .map((s) => s.id)
+        : [];
+      const events = { ...state.events };
+      for (const id of Object.keys(events)) if (!sessions[id]) delete events[id];
+      set({ sessions, events, info: m.info, usage: m.info.usage, connected: true, ready: true });
+      notifyClosed(closed);
       // 再接続時: 読み込み済みのセッションは差分を取り直す
       for (const id of Object.keys(state.events)) void loadEvents(id);
       break;
     }
-    case 'session':
+    case 'session': {
+      const prev = state.sessions[m.session.id];
       set((s) => ({ sessions: { ...s.sessions, [m.session.id]: m.session } }));
+      if (prev && !prev.archived && m.session.archived) notifyClosed([m.session.id]);
       break;
+    }
+    case 'session_removed': {
+      const id = m.sessionId;
+      if (!state.sessions[id] && !state.events[id]) break;
+      set((s) => {
+        const sessions = { ...s.sessions };
+        const events = { ...s.events };
+        delete sessions[id];
+        delete events[id];
+        return { sessions, events };
+      });
+      notifyClosed([id]);
+      break;
+    }
     case 'event': {
       const id = m.event.sessionId;
       const cur = state.events[id];
@@ -160,10 +226,47 @@ if (typeof document !== 'undefined') {
 // ---- 通知 ----
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
-export function showToast(msg: string): void {
-  set({ toast: msg });
+let toastId = 0;
+
+function putToast(t: Omit<Toast, 'id'>, ms: number): void {
+  const id = ++toastId;
+  set({ toast: { ...t, id } });
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => set({ toast: null }), 5000);
+  toastTimer = setTimeout(() => {
+    if (state.toast?.id === id) set({ toast: null });
+  }, ms);
+}
+
+/** 失敗などの知らせ（エラー色の枠） */
+export function showToast(msg: string): void {
+  putToast({ text: msg, tone: 'error' }, 5000);
+}
+
+/** 「元に戻す」付きの知らせ（数秒で消える） */
+export function showUndo(text: string, undo: () => void): void {
+  putToast({ text, tone: 'info', action: { label: '元に戻す', run: undo } }, 6000);
+}
+
+export function dismissToast(): void {
+  set({ toast: null });
+}
+
+// ---- 確認ダイアログ ----
+
+/** 確認ダイアログを出し、確定なら true を返す（表示は ConfirmHost） */
+export function askConfirm(opts: ConfirmOptions): Promise<boolean> {
+  state.confirm?.resolve(false);
+  return new Promise((resolve) => {
+    set({
+      confirm: {
+        ...opts,
+        resolve: (ok) => {
+          set({ confirm: null });
+          resolve(ok);
+        },
+      },
+    });
+  });
 }
 
 /** 操作を実行し、失敗したら通知を出す。 */

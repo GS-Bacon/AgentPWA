@@ -1,6 +1,6 @@
 // 認証状態の確認。サブスクリプション（Claude Pro/Max/Team）で動くときだけ起動を許す。
-import { execFile } from 'node:child_process';
 import type { AuthCheck } from '@agentpwa/shared';
+import type { ProcessLauncher } from './launcher.ts';
 
 /** これらが設定されていると、claude CLI は API キー（従量課金）やクラウド事業者経由で動く。 */
 export const API_KEY_ENV_VARS = [
@@ -10,15 +10,6 @@ export const API_KEY_ENV_VARS = [
   'CLAUDE_CODE_USE_VERTEX',
   'CLAUDE_CODE_USE_FOUNDRY',
 ] as const;
-
-function run(cmd: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { env, timeout: 20_000, windowsHide: true }, (err, stdout, stderr) => {
-      const code = err ? (typeof (err as NodeJS.ErrnoException).code === 'number' ? Number((err as NodeJS.ErrnoException).code) : 1) : 0;
-      resolve({ code: err && (err as NodeJS.ErrnoException).code === 'ENOENT' ? -1 : code, stdout: String(stdout), stderr: String(stderr) });
-    });
-  });
-}
 
 /** `claude auth status`（既定で JSON）の authMethod を、プロトコルの auth に対応付ける。 */
 export function mapAuthMethod(authMethod: string | undefined, loggedIn: boolean | undefined): AuthCheck['auth'] {
@@ -44,9 +35,9 @@ export function detectApiKeyEnv(env: NodeJS.ProcessEnv): string | undefined {
   });
 }
 
-export async function checkClaudeAuth(claudePath: string, env: NodeJS.ProcessEnv): Promise<AuthCheck> {
+export async function checkClaudeAuth(launcher: ProcessLauncher, claudePath: string, env: NodeJS.ProcessEnv): Promise<AuthCheck> {
   const keyVar = detectApiKeyEnv(env);
-  const ver = await run(claudePath, ['--version'], env);
+  const ver = await launcher.run({ command: claudePath, args: ['--version'], env });
   if (ver.code === -1) {
     return { ok: false, auth: 'unknown', detail: `claude CLI が見つかりません（${claudePath}）` };
   }
@@ -54,7 +45,7 @@ export async function checkClaudeAuth(claudePath: string, env: NodeJS.ProcessEnv
   if (keyVar) {
     return { ok: false, version, auth: 'api_key', detail: `${keyVar} が設定されています。従量課金を避けるため起動しません` };
   }
-  const st = await run(claudePath, ['auth', 'status'], env);
+  const st = await launcher.run({ command: claudePath, args: ['auth', 'status'], env });
   let parsed: { loggedIn?: boolean; authMethod?: string; subscriptionType?: string } = {};
   try {
     parsed = JSON.parse(st.stdout);

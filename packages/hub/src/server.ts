@@ -4,8 +4,8 @@ import path from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
-import { PROTOCOL_VERSION, type AgentKind, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
-import type { CreateSessionRequest, HubInfo, ServerMessage, SessionSummary, UsageInfo } from './api.ts';
+import { PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
+import type { CreateSessionRequest, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
 import { HttpError, type SessionManager } from './sessions.ts';
@@ -28,7 +28,10 @@ export interface ServerOptions {
 }
 
 const AGENTS: AgentKind[] = ['claude', 'codex'];
-const MODES: PermissionMode[] = ['ask', 'auto_edit', 'plan'];
+
+function isMode(v: unknown): v is PermissionMode {
+  return typeof v === 'string' && (PERMISSION_MODES as readonly string[]).includes(v);
+}
 
 function parseAction(body: unknown): UserAction {
   const b = (body ?? {}) as Record<string, unknown>;
@@ -44,6 +47,9 @@ function parseAction(body: unknown): UserAction {
       return { type: 'answer', requestId: b.requestId, text: b.text };
     case 'interrupt':
       return { type: 'interrupt' };
+    case 'set_permission_mode':
+      if (!isMode(b.mode)) break;
+      return { type: 'set_permission_mode', mode: b.mode };
   }
   throw new HttpError(400, '操作の形が正しくありません');
 }
@@ -94,12 +100,13 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     const b = (req.body ?? {}) as Partial<CreateSessionRequest>;
     if (b.agent !== undefined && !AGENTS.includes(b.agent)) throw new HttpError(400, 'agent が正しくありません');
     if (typeof b.cwd !== 'string') throw new HttpError(400, 'フォルダを指定してください');
-    const permissionMode = b.permissionMode && MODES.includes(b.permissionMode) ? b.permissionMode : 'ask';
+    // 省略時はプロジェクトの既定のモード。full_auto の可否は SessionManager が確かめる
+    if (b.permissionMode !== undefined && !isMode(b.permissionMode)) throw new HttpError(400, '権限モードが正しくありません');
     return manager.create({
       agent: b.agent,
       cwd: b.cwd,
       model: typeof b.model === 'string' ? b.model : undefined,
-      permissionMode,
+      permissionMode: b.permissionMode,
       prompt: typeof b.prompt === 'string' ? b.prompt : undefined,
       title: typeof b.title === 'string' ? b.title : undefined,
     });
@@ -107,9 +114,17 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
 
   app.get<{ Params: { id: string } }>('/api/sessions/:id', async (req) => manager.get(req.params.id));
 
-  app.patch<{ Params: { id: string }; Body: { title?: string; archived?: boolean } }>('/api/sessions/:id', async (req) =>
-    manager.update(req.params.id, req.body ?? {}),
-  );
+  // 名前の変更とアーカイブ・解除（アーカイブするときは、動いているセッションを先に止める）
+  app.patch<{ Params: { id: string }; Body: UpdateSessionRequest }>('/api/sessions/:id', async (req) => {
+    const b = req.body ?? {};
+    return manager.update(req.params.id, {
+      title: typeof b.title === 'string' ? b.title : undefined,
+      archived: typeof b.archived === 'boolean' ? b.archived : undefined,
+    });
+  });
+
+  // 削除は1件ずつ（一括削除は作らない）。エージェント側の履歴を消せなかったときは historyError を返す
+  app.delete<{ Params: { id: string } }>('/api/sessions/:id', async (req) => manager.remove(req.params.id));
 
   app.get<{ Params: { id: string }; Querystring: { after?: string } }>('/api/sessions/:id/events', async (req) =>
     manager.events(req.params.id, Number(req.query.after ?? 0) || 0),
@@ -132,10 +147,12 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(m));
     };
     const onSession = (session: SessionSummary) => send({ type: 'session', session });
+    const onRemoved = (sessionId: string) => send({ type: 'session_removed', sessionId });
     const onEvent = (event: SessionEvent) => send({ type: 'event', event });
     const onUsage = (agent: AgentKind, usage: UsageInfo[]) => send({ type: 'usage', agent, usage });
     const onConfig = () => void info(req).then((i) => send({ type: 'info', info: i }));
     manager.on('session', onSession);
+    manager.on('removed', onRemoved);
     manager.on('event', onEvent);
     manager.on('usage', onUsage);
     manager.on('config', onConfig);
@@ -143,6 +160,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     socket.on('close', () => {
       clearInterval(ping);
       manager.off('session', onSession);
+      manager.off('removed', onRemoved);
       manager.off('event', onEvent);
       manager.off('usage', onUsage);
       manager.off('config', onConfig);

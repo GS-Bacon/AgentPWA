@@ -3,9 +3,9 @@
 // 画面に収まらないペインは横スクロール（iPad は横スワイプ）で表示する。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionSummary } from '@agentpwa/hub/api';
-import { getState, sortedSessions, useStore } from '../lib/store.ts';
+import { getState, onSessionsClosed, sortedSessions, useStore } from '../lib/store.ts';
+import type { ArchiveSectionProps } from '../App.tsx';
 import { DRAG_TYPE, isWaiting, Rail, Sidebar } from './Sidebar.tsx';
-import { MODE_LABEL } from '../lib/format.ts';
 import {
   addPane,
   closePane,
@@ -20,7 +20,7 @@ import {
   type Pane,
 } from '../lib/layout.ts';
 import { decide, useNow } from '../components/Requests.tsx';
-import { ConnState, SessionMenu, StatusLabel } from '../components/common.tsx';
+import { AutoWarn, ConnState, SessionMenu, StatusLabel } from '../components/common.tsx';
 import { SessionView } from '../components/SessionView.tsx';
 import { NewSessionForm } from '../components/NewSession.tsx';
 import { Settings } from '../components/Settings.tsx';
@@ -108,9 +108,10 @@ function PaneView({
               <h2 className="ellipsis" style={{ fontSize: 13.5, fontWeight: 600 }}>{s.title}</h2>
               <span className="ellipsis muted" style={{ fontSize: 11 }}>
                 <AgentIcon agent={s.agent} size={12} /> {s.folderName} · {s.machine}
-                {s.model ? ` · ${s.model}` : ''} · {MODE_LABEL[s.permissionMode]}
+                {s.model ? ` · ${s.model}` : ''}
               </span>
             </div>
+            <AutoWarn s={s} />
             <StatusLabel s={s} withTime now={now} />
             <SessionMenu
               s={s}
@@ -264,8 +265,10 @@ function GridPanes({ layout, renderPane }: { layout: LayoutState; renderPane: (p
 
 // ---- 全体 ----
 
-export function DesktopApp({ showArchived, setShowArchived }: { showArchived: boolean; setShowArchived: (v: boolean) => void }) {
+export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProps) {
   const [layout, update] = useLayout();
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
   const sessions = useStore((s) => s.sessions);
   const [newSession, setNewSession] = useState<{ cwd?: string } | null>(null);
   const [settings, setSettings] = useState(false);
@@ -280,6 +283,24 @@ export function DesktopApp({ showArchived, setShowArchived }: { showArchived: bo
   }, []);
 
   const waiting = sortedSessions(sessions).filter((s) => s.rank <= 3);
+
+  // アーカイブ・削除されたセッションのペインを閉じる（どの端末で操作しても届く）。並びの自動保存からも外れる
+  useEffect(() => {
+    const closeFor = (ids: Set<string>) => {
+      update((l) => {
+        let next = l;
+        for (const p of l.panes) if (p.sessionId && ids.has(p.sessionId)) next = closePane(next, p.id);
+        return next;
+      });
+      setMaximized((m) => (m && layoutRef.current.panes.some((p) => p.id === m && p.sessionId && ids.has(p.sessionId)) ? null : m));
+    };
+    // 開いていない間に削除されたセッションのペインも閉じる
+    const known = getState().sessions;
+    const missing = layoutRef.current.panes.filter((p) => p.sessionId && !known[p.sessionId]).map((p) => p.sessionId as string);
+    if (missing.length) closeFor(new Set(missing));
+    return onSessionsClosed((ids) => closeFor(new Set(ids)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const nextWaiting = useCallback(() => {
     update((l) => {
@@ -390,7 +411,7 @@ export function DesktopApp({ showArchived, setShowArchived }: { showArchived: bo
               // プロジェクトの指定がなければ、フォーカス中のペインのセッションのプロジェクトにする
               const sid = layout.panes.find((p) => p.id === layout.focused)?.sessionId;
               setNewSession({ cwd: cwd ?? (sid ? sessions[sid]?.cwd : undefined) });
-            }} showArchived={showArchived} onSettings={() => setSettings(true)} />
+            }} archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} onSettings={() => setSettings(true)} />
         ) : (
           <Rail layout={layout} update={update} onSettings={() => setSettings(true)} />
         )}
@@ -427,7 +448,7 @@ export function DesktopApp({ showArchived, setShowArchived }: { showArchived: bo
               </button>
             </div>
             <div className="dialog-body">
-              <Settings showArchived={showArchived} setShowArchived={setShowArchived} />
+              <Settings />
             </div>
           </div>
         </div>

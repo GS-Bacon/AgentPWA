@@ -3,10 +3,11 @@ import { useEffect, useState } from 'react';
 import { useStore } from './lib/store.ts';
 import { PhoneApp } from './phone/PhoneApp.tsx';
 import { DesktopApp } from './desktop/DesktopApp.tsx';
-import { Toast } from './components/common.tsx';
+import { ConfirmHost, Toast } from './components/common.tsx';
 
 const PHONE_MAX = 700;
-const ARCHIVE_KEY = 'agentpwa.showArchived';
+/** 一覧の末尾の「アーカイブ済み」を開いているか（端末ごとに覚える） */
+const ARCHIVE_OPEN_KEY = 'agentpwa.archivedOpen';
 
 function useIsPhone(): boolean {
   const [phone, setPhone] = useState(() => window.innerWidth < PHONE_MAX);
@@ -18,20 +19,25 @@ function useIsPhone(): boolean {
   return phone;
 }
 
+export interface ArchiveSectionProps {
+  archivedOpen: boolean;
+  setArchivedOpen: (v: boolean) => void;
+}
+
 export function App() {
   const phone = useIsPhone();
   const ready = useStore((s) => s.ready);
-  const [showArchived, setShowArchivedState] = useState(() => {
+  const [archivedOpen, setOpenState] = useState(() => {
     try {
-      return localStorage.getItem(ARCHIVE_KEY) === '1';
+      return localStorage.getItem(ARCHIVE_OPEN_KEY) === '1';
     } catch {
       return false;
     }
   });
-  const setShowArchived = (v: boolean) => {
-    setShowArchivedState(v);
+  const setArchivedOpen = (v: boolean) => {
+    setOpenState(v);
     try {
-      localStorage.setItem(ARCHIVE_KEY, v ? '1' : '0');
+      localStorage.setItem(ARCHIVE_OPEN_KEY, v ? '1' : '0');
     } catch {
       /* noop */
     }
@@ -45,8 +51,9 @@ export function App() {
   }
   return (
     <>
-      {phone ? <PhoneApp showArchived={showArchived} setShowArchived={setShowArchived} /> : <DesktopApp showArchived={showArchived} setShowArchived={setShowArchived} />}
+      {phone ? <PhoneApp archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} /> : <DesktopApp archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} />}
       <Toast />
+      <ConfirmHost />
     </>
   );
 }

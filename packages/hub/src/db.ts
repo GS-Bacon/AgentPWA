@@ -37,7 +37,17 @@ export class Store {
       deleteDeltas: this.db.prepare("DELETE FROM events WHERE session_id = ? AND type = 'message_delta' AND message_id = ?"),
       eventsAfter: this.db.prepare('SELECT data FROM events WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?'),
       maxSeq: this.db.prepare('SELECT MAX(seq) AS m FROM events WHERE session_id = ?'),
+      deleteSession: this.db.prepare('DELETE FROM sessions WHERE id = ?'),
+      deleteEvents: this.db.prepare('DELETE FROM events WHERE session_id = ?'),
     };
+  }
+
+  /** セッションとそのイベントをすべて消す（元に戻せない） */
+  deleteSession(sessionId: string): void {
+    this.transaction(() => {
+      this.stmts.deleteEvents.run(sessionId);
+      this.stmts.deleteSession.run(sessionId);
+    });
   }
 
   loadSessions(): SessionRecord[] {

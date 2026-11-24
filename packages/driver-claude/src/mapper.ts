@@ -1,7 +1,7 @@
 // claude CLI の stream-json 出力（1行1件）を DriverEvent に変換する。
 // 状態（status）の管理は session.ts が行い、ここでは出力の正規化だけをする。
-import type { DriverEvent } from '@agentpwa/shared';
-import { summarizeTool } from './permissions.ts';
+import type { DriverEvent, PermissionMode } from '@agentpwa/shared';
+import { fromClaudePermissionMode, summarizeTool } from './permissions.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
@@ -10,6 +10,8 @@ export interface MapResult {
   events: DriverEvent[];
   /** system/init で分かった値 */
   init?: { sessionId: string; apiKeySource?: string; model?: string };
+  /** system/init・system/status で分かった、そのときの権限モード（重複の間引きは session.ts が行う） */
+  permissionMode?: PermissionMode;
   /** エージェントが作業している印（status を running に戻すきっかけ） */
   activity?: boolean;
   /** ターンが終わった（result を受け取った） */
@@ -53,14 +55,18 @@ export class StreamMapper {
 
   map(msg: Json): MapResult {
     switch (msg?.type) {
-      case 'system':
+      case 'system': {
+        // system/init と system/status は、そのときの権限モードを持つ（計画モードの終了など CLI 自身の変更も届く）
+        const mode = msg.subtype === 'init' || msg.subtype === 'status' ? fromClaudePermissionMode(msg.permissionMode) : undefined;
         if (msg.subtype === 'init' && typeof msg.session_id === 'string') {
           return {
             events: [{ type: 'resume_token', token: msg.session_id }],
             init: { sessionId: msg.session_id, apiKeySource: msg.apiKeySource, model: msg.model },
+            permissionMode: mode,
           };
         }
-        return { events: [] };
+        return { events: [], permissionMode: mode };
+      }
       case 'stream_event':
         return this.mapStreamEvent(msg);
       case 'assistant':

@@ -1,9 +1,9 @@
 // セッション管理: Driver の起動・停止・再開、イベントの採番・保存・配信。
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import type { AgentDriver, AgentKind, AuthCheck, DriverEvent, DriverSession, SessionEvent, UserAction } from '@agentpwa/shared';
-import type { CreateSessionRequest, SessionSummary, UsageInfo } from './api.ts';
-import { findAllowedFolder, type HubConfig } from './config.ts';
+import { PERMISSION_MODES, type AgentDriver, type AgentKind, type AuthCheck, type DriverEvent, type DriverSession, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
+import type { CreateSessionRequest, DeleteSessionResult, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
+import { findAllowedFolder, isModeAllowed, type HubConfig } from './config.ts';
 import type { Store } from './db.ts';
 import { applyEvent, markRead, newRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
 
@@ -18,8 +18,12 @@ export class HttpError extends Error {
 
 const AUTH_CACHE_MS = 60_000;
 
+const FULL_AUTO_DENIED = '「すべて自動」は、このプロジェクトでは許可されていません（設定ファイルの folders で allowFullAuto: true にしたプロジェクトだけで使えます）';
+
 export interface SessionManagerEvents {
   session: [SessionSummary];
+  /** セッションを削除した */
+  removed: [string];
   event: [SessionEvent];
   usage: [AgentKind, UsageInfo[]];
   config: [];
@@ -89,6 +93,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   /** 設定ファイルが読み直されたことを Web に知らせる */
   notifyConfigChanged(): void {
     this.authCache.clear();
+    // full_auto の許可を外されたプロジェクトで動いているセッションは「毎回確認」に戻す
+    for (const [id, s] of this.live) {
+      const rec = this.records.get(id);
+      if (rec && !isModeAllowed(this.config, rec.cwd, rec.permissionMode)) {
+        s.send({ type: 'set_permission_mode', mode: 'ask' }).catch(() => {});
+      }
+    }
     this.emit('config');
   }
 
@@ -102,6 +113,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (req.agent && req.agent !== agent) throw new HttpError(400, `このプロジェクトは ${agent} 用です`);
     const driver = this.drivers.get(agent);
     if (!driver) throw new HttpError(400, `${agent} の Driver がありません`);
+    const permissionMode = req.permissionMode ?? folder.defaultPermissionMode ?? 'ask';
+    if (!PERMISSION_MODES.includes(permissionMode)) throw new HttpError(400, '権限モードが正しくありません');
+    if (!isModeAllowed(this.config, folder.path, permissionMode)) throw new HttpError(403, FULL_AUTO_DENIED);
     const auth = await this.checkAuth(agent, true);
     if (!auth.ok || auth.auth === 'api_key') {
       throw new HttpError(409, auth.detail ?? '認証を確認できないため起動しません');
@@ -114,7 +128,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       cwd: folder.path,
       folderName: folder.name,
       model: req.model || undefined,
-      permissionMode: req.permissionMode ?? 'ask',
+      permissionMode,
       now,
     });
     this.records.set(rec.id, rec);
@@ -126,33 +140,55 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   /** 止まっているセッションを再開する（resume_token があれば続きから）。 */
   async resume(id: string): Promise<SessionSummary> {
-    this.mustGet(id);
+    const rec = this.mustGet(id);
+    if (rec.archived) throw new HttpError(409, 'アーカイブ済みのセッションです。アーカイブを解除してから再開してください');
     await this.ensureLive(id);
     return this.get(id);
   }
 
   async stop(id: string): Promise<SessionSummary> {
-    const rec = this.mustGet(id);
-    const s = this.live.get(id);
-    if (s) {
-      await s.stop();
-      this.live.delete(id);
-    } else if (rec.status !== 'stopped') {
-      this.record(id, { type: 'status', status: 'stopped' });
-    }
+    this.mustGet(id);
+    await this.halt(id);
     return this.get(id);
   }
 
   async action(id: string, action: UserAction): Promise<void> {
-    this.mustGet(id);
+    const rec = this.mustGet(id);
+    if (action.type === 'set_permission_mode') return this.setPermissionMode(id, action.mode);
     let s = this.live.get(id);
     if (!s) {
       if (action.type === 'interrupt') return;
       if (action.type !== 'send') throw new HttpError(409, 'セッションが動いていません。再開してから操作してください');
+      if (rec.archived) throw new HttpError(409, 'アーカイブ済みのセッションです。アーカイブを解除してから送信してください');
       s = await this.ensureLive(id);
     }
     try {
       await s.send(action);
+    } catch (e) {
+      throw new HttpError(409, (e as Error).message);
+    }
+  }
+
+  /**
+   * 権限モードを切り替える。full_auto は許可したプロジェクトだけで、それ以外は Driver に渡さずに拒否する。
+   * 動いていないセッションは Hub が覚えておき、次に起動・再開するときに渡す。
+   */
+  private async setPermissionMode(id: string, mode: PermissionMode): Promise<void> {
+    const rec = this.mustGet(id);
+    if (!PERMISSION_MODES.includes(mode)) throw new HttpError(400, '権限モードが正しくありません');
+    if (!isModeAllowed(this.config, rec.cwd, mode)) throw new HttpError(403, FULL_AUTO_DENIED);
+    let s = this.live.get(id);
+    if (!s) {
+      const pending = this.starting.get(id);
+      if (pending) s = await pending.catch(() => undefined);
+    }
+    if (!s) {
+      if (rec.permissionMode !== mode) this.record(id, { type: 'permission_mode', mode });
+      return;
+    }
+    try {
+      // 反映できたら Driver が permission_mode を送る。できなければ error（fatal: false）が届き、モードは変わらない
+      await s.send({ type: 'set_permission_mode', mode });
     } catch (e) {
       throw new HttpError(409, (e as Error).message);
     }
@@ -169,7 +205,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return this.summary(next);
   }
 
-  update(id: string, patch: { title?: string; archived?: boolean }): SessionSummary {
+  /**
+   * 名前の変更とアーカイブ・解除。
+   * アーカイブするときは、動いているセッション（stopped 以外）を先に止める。解除しても stopped のままで、
+   * 次に送信したときに resume_token で再開する。
+   */
+  async update(id: string, patch: UpdateSessionRequest): Promise<SessionSummary> {
+    const first = this.mustGet(id);
+    if (patch.archived === true && !first.archived) await this.halt(id);
     const rec = this.mustGet(id);
     const next: SessionRecord = { ...rec };
     if (typeof patch.title === 'string' && patch.title.trim()) next.title = patch.title.trim().slice(0, 100);
@@ -179,6 +222,30 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const sum = this.summary(next);
     this.emit('session', sum);
     return sum;
+  }
+
+  /**
+   * セッションを1件削除する（元に戻せない。一括削除は作らない）。
+   * 動いていれば止め、Hub の記録（セッションとイベント）を消してから、Driver が対応していればエージェント側の履歴も消す。
+   * エージェント側の削除に失敗しても Hub 側の削除は取り消さず、理由を historyError で返す。
+   */
+  async remove(id: string): Promise<DeleteSessionResult> {
+    this.mustGet(id);
+    await this.halt(id);
+    const rec = this.mustGet(id);
+    this.records.delete(id);
+    this.live.delete(id);
+    this.store.deleteSession(id);
+    this.emit('removed', id);
+    const driver = this.drivers.get(rec.agent);
+    if (driver?.deleteHistory && rec.resumeToken) {
+      try {
+        await driver.deleteHistory({ cwd: rec.cwd, resumeToken: rec.resumeToken });
+      } catch (e) {
+        return { ok: true, historyError: (e as Error).message || String(e) };
+      }
+    }
+    return { ok: true };
   }
 
   /** Hub の終了時: 子プロセスを止める。状態は書き換えない（次の起動時に recoverAfterRestart が整える）。 */
@@ -194,6 +261,22 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const rec = this.records.get(id);
     if (!rec) throw new HttpError(404, 'セッションが見つかりません');
     return rec;
+  }
+
+  /** 起動中なら起動を待ってから、動いているセッションを止める。終わったら必ず stopped にする。 */
+  private async halt(id: string): Promise<void> {
+    const pending = this.starting.get(id);
+    if (pending) await pending.catch(() => {});
+    const s = this.live.get(id);
+    if (s) {
+      try {
+        await s.stop();
+      } finally {
+        this.live.delete(id);
+      }
+    }
+    const rec = this.records.get(id);
+    if (rec && rec.status !== 'stopped') this.record(id, { type: 'status', status: 'stopped' });
   }
 
   private summary(rec: SessionRecord): SessionSummary {
@@ -217,13 +300,20 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         const auth = await this.checkAuth(rec.agent);
         if (!auth.ok || auth.auth === 'api_key') throw new HttpError(409, auth.detail ?? '認証を確認できないため起動しません');
       }
+      // 設定の変更で full_auto の許可が外れたプロジェクトでは、Driver に full_auto を渡さない
+      let permissionMode = rec.permissionMode;
+      if (!isModeAllowed(this.config, rec.cwd, permissionMode)) {
+        permissionMode = 'ask';
+        this.record(id, { type: 'error', message: '「すべて自動」はこのプロジェクトで許可されていないため、「毎回確認」で起動します', fatal: false });
+        this.record(id, { type: 'permission_mode', mode: permissionMode });
+      }
       try {
         const session = await driver.start(
           {
             sessionId: id,
             cwd: rec.cwd,
             model: rec.model,
-            permissionMode: rec.permissionMode,
+            permissionMode,
             initialPrompt,
             resumeToken: rec.resumeToken,
           },

@@ -3,11 +3,13 @@
 // セッションの詳細へは1画面ずつ遷移する。
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionSummary } from '@agentpwa/hub/api';
-import { sortedSessions, useStore, waitingCount } from '../lib/store.ts';
-import { shortPath, timeLabel } from '../lib/format.ts';
-import { buildProjects, findProject, type Project } from '../lib/projects.ts';
+import { onSessionsClosed, sortedSessions, useStore, waitingCount } from '../lib/store.ts';
+import type { ArchiveSectionProps } from '../App.tsx';
+import { elapsed, shortPath, timeLabel } from '../lib/format.ts';
+import { archivedSessions, buildProjects, findProject, type Project } from '../lib/projects.ts';
+import { archiveSession, deleteSession, unarchiveSession } from '../lib/sessionActions.ts';
 import { ApprovalInline, useNow } from '../components/Requests.tsx';
-import { ConnState, SessionMenu, StatusLabel } from '../components/common.tsx';
+import { AutoWarn, ConnState, SessionMenu, StatusLabel } from '../components/common.tsx';
 import { SessionView } from '../components/SessionView.tsx';
 import { NewSessionForm } from '../components/NewSession.tsx';
 import { Settings } from '../components/Settings.tsx';
@@ -60,7 +62,10 @@ function PhoneRow({ s, now, onOpen, showProject }: { s: SessionSummary; now: num
       <article className={`row${s.rank === 1 ? ' row-attention' : ''}`} onClick={onOpen} role="link" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onOpen()}>
         <div className="row-top">
           <StatusLabel s={s} />
-          <span className="muted">{timeLabel(s, now)}</span>
+          <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <AutoWarn s={s} />
+            <span className="muted">{timeLabel(s, now)}</span>
+          </span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <h3 className="row-title">{s.title}</h3>
@@ -89,7 +94,99 @@ function PhoneRow({ s, now, onOpen, showProject }: { s: SessionSummary; now: num
           )}
         </span>
       </div>
-      <span className="muted" style={{ fontSize: 12, flex: 'none' }}>{timeLabel(s, now)}</span>
+      <AutoWarn s={s} />
+      <span className="muted" style={{ fontSize: 12, flex: 'none' }}>{s.archived ? elapsed(s.updatedAt, now) : timeLabel(s, now)}</span>
+    </div>
+  );
+}
+
+const SWIPE_BTN_W = 88;
+
+interface SwipeAction {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}
+
+/**
+ * 左にスワイプすると操作のボタン（アーカイブ・削除）が出る行。
+ * 縦のスクロールはブラウザに任せ（touch-action: pan-y）、横の動きだけを扱う。開いている行は1つだけ。
+ */
+function SwipeRow({ id, openId, setOpenId, actions, children }: { id: string; openId: string | null; setOpenId: (id: string | null) => void; actions: SwipeAction[]; children: React.ReactNode }) {
+  const width = actions.length * SWIPE_BTN_W;
+  const open = openId === id;
+  const [drag, setDrag] = useState<number | null>(null);
+  // 指を離したときの判定は、描画を待たずに最新の位置で行う（速いスワイプでも取りこぼさない）
+  const st = useRef<{ x: number; y: number; base: number; decided: boolean; horiz: boolean; pos: number } | null>(null);
+  const moved = useRef(false);
+  const offset = drag ?? (open ? -width : 0);
+  const end = () => {
+    const s0 = st.current;
+    st.current = null;
+    if (s0?.horiz) setOpenId(s0.base === 0 ? (s0.pos < -48 ? id : null) : s0.pos > -width + 48 ? null : id);
+    setDrag(null);
+  };
+  return (
+    <div style={{ position: 'relative', overflow: 'hidden' }}>
+      <div className="swipe-actions" style={{ width }} aria-hidden={!open}>
+        {actions.map((a) => (
+          <button
+            key={a.label}
+            className={a.danger ? 'swipe-btn swipe-danger' : 'swipe-btn'}
+            tabIndex={open ? 0 : -1}
+            onClick={() => {
+              setOpenId(null);
+              a.onClick();
+            }}
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
+      <div
+        className="swipe-content"
+        style={{ transform: `translateX(${offset}px)`, transition: drag === null ? 'transform .18s ease-out' : 'none' }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          moved.current = false;
+          st.current = { x: e.clientX, y: e.clientY, base: open ? -width : 0, decided: false, horiz: false, pos: open ? -width : 0 };
+        }}
+        onPointerMove={(e) => {
+          const s0 = st.current;
+          if (!s0) return;
+          const dx = e.clientX - s0.x;
+          const dy = e.clientY - s0.y;
+          if (!s0.decided) {
+            if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+            s0.decided = true;
+            s0.horiz = Math.abs(dx) > Math.abs(dy);
+            if (s0.horiz) e.currentTarget.setPointerCapture(e.pointerId);
+          }
+          if (!s0.horiz) return;
+          moved.current = true;
+          s0.pos = Math.max(-width - 24, Math.min(0, s0.base + dx));
+          setDrag(s0.pos);
+        }}
+        onPointerUp={end}
+        onPointerCancel={() => {
+          st.current = null;
+          setDrag(null);
+        }}
+        onClickCapture={(e) => {
+          // スワイプの直後のクリックと、開いている行のタップ（閉じるだけ）では、セッションを開かない
+          if (moved.current) {
+            moved.current = false;
+            e.preventDefault();
+            e.stopPropagation();
+          } else if (open) {
+            e.preventDefault();
+            e.stopPropagation();
+            setOpenId(null);
+          }
+        }}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -141,14 +238,37 @@ function ProjectTabs({ projects, current, total, go }: { projects: Project[]; cu
   );
 }
 
-function ListScreen({ projectKey, showArchived, go }: { projectKey: string | null; showArchived: boolean; go: (h: string, replace?: boolean) => void }) {
+function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSectionProps & { projectKey: string | null; go: (h: string, replace?: boolean) => void }) {
   const sessions = useStore((s) => s.sessions);
   const info = useStore((s) => s.info);
   const ready = useStore((s) => s.ready);
   const now = useNow();
-  const projects = buildProjects(info, sessions, showArchived);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const projects = buildProjects(info, sessions);
   const project = projectKey ? findProject(projects, projectKey) : undefined;
-  const list = project ? project.sessions : sortedSessions(sessions, undefined, showArchived);
+  const list = project ? project.sessions : sortedSessions(sessions);
+  const archived = archivedSessions(sessions, project?.key);
+  const row = (s: SessionSummary) => (
+    <SwipeRow
+      key={s.id}
+      id={s.id}
+      openId={openId}
+      setOpenId={setOpenId}
+      actions={
+        s.archived
+          ? [
+              { label: 'アーカイブを解除', onClick: () => void unarchiveSession(s.id) },
+              { label: '削除', onClick: () => void deleteSession(s.id), danger: true },
+            ]
+          : [
+              { label: 'アーカイブ', onClick: () => void archiveSession(s.id) },
+              { label: '削除', onClick: () => void deleteSession(s.id), danger: true },
+            ]
+      }
+    >
+      <PhoneRow s={s} now={now} showProject={!project} onOpen={() => go(`#/s/${s.id}`)} />
+    </SwipeRow>
+  );
   const total = waitingCount(sessions);
   const mine = list.filter((s) => s.rank <= 3);
   const running = list.filter((s) => s.rank === 4);
@@ -204,11 +324,22 @@ function ListScreen({ projectKey, showArchived, go }: { projectKey: string | nul
           </div>
         )}
         {mine.length > 0 && <h2 className="list-heading">あなたの番 · {mine.length}</h2>}
-        {mine.map((s) => <PhoneRow key={s.id} s={s} now={now} showProject={!project} onOpen={() => go(`#/s/${s.id}`)} />)}
+        {mine.map(row)}
         {running.length > 0 && <h2 className="list-heading">実行中 · {running.length}</h2>}
-        {running.map((s) => <PhoneRow key={s.id} s={s} now={now} showProject={!project} onOpen={() => go(`#/s/${s.id}`)} />)}
+        {running.map(row)}
         {idle.length > 0 && <h2 className="list-heading">アイドル · {idle.length}</h2>}
-        {idle.map((s) => <PhoneRow key={s.id} s={s} now={now} showProject={!project} onOpen={() => go(`#/s/${s.id}`)} />)}
+        {idle.map(row)}
+        {archived.length > 0 && (
+          <>
+            <button className="list-heading archive-toggle" aria-expanded={archivedOpen} onClick={() => setArchivedOpen(!archivedOpen)}>
+              <span aria-hidden="true" style={{ width: 12, display: 'inline-block', transform: archivedOpen ? 'rotate(90deg)' : 'none', transition: 'transform .1s' }}>
+                ▸
+              </span>
+              アーカイブ済み（{archived.length}）
+            </button>
+            {archivedOpen && archived.map(row)}
+          </>
+        )}
       </main>
     </>
   );
@@ -234,7 +365,7 @@ function DetailScreen({ id, back }: { id: string; back: () => void }) {
         <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
           <h1 className="ellipsis" style={{ fontSize: 15, fontWeight: 600 }}>{s.title}</h1>
           <p className="ellipsis muted" style={{ fontSize: 12 }}>
-            <AgentIcon agent={s.agent} size={12} /> {s.folderName} · <StatusLabel s={s} withTime now={now} />
+            <AgentIcon agent={s.agent} size={12} /> {s.folderName} · <StatusLabel s={s} withTime now={now} /> <AutoWarn s={s} />
           </p>
         </div>
         <SessionMenu s={s} />
@@ -283,12 +414,25 @@ function TabBar({ route, go }: { route: Route; go: (h: string, replace?: boolean
   );
 }
 
-export function PhoneApp({ showArchived, setShowArchived }: { showArchived: boolean; setShowArchived: (v: boolean) => void }) {
+export function PhoneApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProps) {
   const [route, go] = useRoute();
   const back = () => {
     if (history.length > 1) history.back();
     else go('#/', true);
   };
+  // 表示中のセッションがアーカイブ・削除されたら（どの端末で操作しても）一覧に戻る
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const goRef = useRef(go);
+  goRef.current = go;
+  useEffect(
+    () =>
+      onSessionsClosed((ids) => {
+        const r = routeRef.current;
+        if (r.name === 'session' && ids.includes(r.id)) goRef.current('#/', true);
+      }),
+    [],
+  );
 
   if (route.name === 'session') return <DetailScreen id={route.id} back={back} />;
   if (route.name === 'new') {
@@ -302,11 +446,11 @@ export function PhoneApp({ showArchived, setShowArchived }: { showArchived: bool
             <h1 style={{ fontSize: 22, fontWeight: 600 }}>設定</h1>
           </header>
           <main style={{ flex: '1 1 auto', overflowY: 'auto' }}>
-            <Settings showArchived={showArchived} setShowArchived={setShowArchived} />
+            <Settings />
           </main>
         </>
       ) : (
-        <ListScreen projectKey={route.project} showArchived={showArchived} go={go} />
+        <ListScreen projectKey={route.project} archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} go={go} />
       )}
       <TabBar route={route} go={go} />
     </div>
