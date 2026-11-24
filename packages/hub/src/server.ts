@@ -4,7 +4,7 @@ import path from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
-import { EFFORT_LEVELS, PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type EffortLevel, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
+import { EFFORT_LEVELS, PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type Attachment, type EffortLevel, type PermissionMode, type SessionEvent, type SlashCommand, type UserAction } from '@agentpwa/shared';
 import type { CreateProjectRequest, CreateSessionRequest, FileInfo, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { checkOrigin, checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
@@ -39,12 +39,37 @@ function isEffort(v: unknown): v is EffortLevel {
   return typeof v === 'string' && (EFFORT_LEVELS as readonly string[]).includes(v);
 }
 
+/** 添付ファイルの上限（1回の送信あたり） */
+const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+/** 送信の本文の上限（添付ファイルの base64 を含む） */
+const ACTION_BODY_LIMIT = Math.ceil((MAX_ATTACHMENT_BYTES * 4) / 3) + 1_000_000;
+
+function parseAttachments(v: unknown): Attachment[] | undefined {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.length > MAX_ATTACHMENTS) throw new HttpError(400, `添付できるファイルは ${MAX_ATTACHMENTS} 件までです`);
+  let total = 0;
+  const out: Attachment[] = [];
+  for (const a of v as Record<string, unknown>[]) {
+    if (typeof a?.name !== 'string' || !a.name.trim() || a.name.length > 255) throw new HttpError(400, '添付ファイルの名前が正しくありません');
+    if (typeof a.mimeType !== 'string' || a.mimeType.length > 200) throw new HttpError(400, '添付ファイルの種類が正しくありません');
+    if (typeof a.data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(a.data)) throw new HttpError(400, '添付ファイルの中身が正しくありません');
+    total += Math.floor((a.data.length * 3) / 4);
+    out.push({ name: a.name.trim(), mimeType: a.mimeType || 'application/octet-stream', data: a.data });
+  }
+  if (total > MAX_ATTACHMENT_BYTES) throw new HttpError(413, `添付ファイルは合計 ${MAX_ATTACHMENT_BYTES / 1024 / 1024}MB までです`);
+  return out.length > 0 ? out : undefined;
+}
+
 function parseAction(body: unknown): UserAction {
   const b = (body ?? {}) as Record<string, unknown>;
   switch (b.type) {
-    case 'send':
-      if (typeof b.text !== 'string' || !b.text.trim()) break;
-      return { type: 'send', text: b.text };
+    case 'send': {
+      if (typeof b.text !== 'string') break;
+      const attachments = parseAttachments(b.attachments);
+      if (!b.text.trim() && !attachments) break;
+      return attachments ? { type: 'send', text: b.text, attachments } : { type: 'send', text: b.text };
+    }
     case 'approve':
       if (typeof b.requestId !== 'string' || !['allow', 'allow_session', 'deny'].includes(String(b.decision))) break;
       return { type: 'approve', requestId: b.requestId, decision: b.decision as 'allow' | 'allow_session' | 'deny', note: typeof b.note === 'string' ? b.note : undefined };
@@ -110,7 +135,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       machine: config.machineName,
       user: req.tailscaleUser,
       folders: config.folders,
-      agents: Object.fromEntries(AGENTS.map((a, i) => [a, { auth: auths[i], fake: opts.fakeAgents.includes(a) }])) as HubInfo['agents'],
+      agents: Object.fromEntries(AGENTS.map((a, i) => [a, { auth: auths[i], fake: opts.fakeAgents.includes(a), ...manager.features(a) }])) as HubInfo['agents'],
       usage: Object.fromEntries(AGENTS.map((a) => [a, manager.usageOf(a)])) as HubInfo['usage'],
       configPath: opts.configPath,
       protocolVersion: PROTOCOL_VERSION,
@@ -175,10 +200,13 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   app.post<{ Params: { id: string }; Body: { seq?: number } }>('/api/sessions/:id/read', async (req) =>
     manager.read(req.params.id, typeof req.body?.seq === 'number' ? req.body.seq : undefined),
   );
-  app.post<{ Params: { id: string } }>('/api/sessions/:id/action', async (req) => {
+  // 添付ファイル（base64）を含められるよう、この API だけ本文の上限を上げる
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/action', { bodyLimit: ACTION_BODY_LIMIT }, async (req) => {
     await manager.action(req.params.id, parseAction(req.body));
     return { ok: true };
   });
+  // 入力欄のスラッシュコマンドの補完
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/commands', async (req): Promise<SlashCommand[]> => manager.commands(req.params.id));
 
   // ファイルビュワー（docs/architecture.md の 5.1、6.7）。プロジェクトのフォルダの下のファイルだけ
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>('/api/sessions/:id/file-info', async (req): Promise<FileInfo> => {

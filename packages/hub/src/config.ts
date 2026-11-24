@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PERMISSION_MODES, type PermissionMode } from '@agentpwa/shared';
+import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type PermissionMode } from '@agentpwa/shared';
 import type { FolderEntry } from './api.ts';
 
 export interface HubConfig {
@@ -76,13 +76,13 @@ function validate(c: HubConfig, file: string): HubConfig {
     }
   }
   if (errors.length) throw new Error(`設定ファイル ${file} の誤り:\n- ${errors.join('\n- ')}`);
-  // agent を省略したプロジェクトは Claude、full_auto は許さない、既定の権限モードは「毎回確認」とする
+  // agent を省略したプロジェクトは Claude、full_auto は許さない、既定の権限モードは DEFAULT_PERMISSION_MODE（自動承認）とする
   c.folders = c.folders.map((f) => ({
     name: f.name || path.basename(f.path),
     path: path.resolve(f.path),
     agent: f.agent ?? 'claude',
     allowFullAuto: f.allowFullAuto === true,
-    defaultPermissionMode: f.defaultPermissionMode ?? 'ask',
+    defaultPermissionMode: f.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE,
   }));
   c.projectRoots = c.projectRoots.map((r) => path.resolve(r));
   return c;

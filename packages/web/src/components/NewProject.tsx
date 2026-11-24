@@ -2,7 +2,7 @@
 // 設定タブと新規セッションの開始画面から開く（docs/architecture.md の 6.3）。
 // いまはこのPCだけ。作り方は「既存のフォルダを選ぶ」「新しいフォルダを作る」の2つ（git clone と SSH 先は後のフェーズ）。
 import { useEffect, useRef, useState } from 'react';
-import { PERMISSION_MODES, type AgentKind, type PermissionMode } from '@agentpwa/shared';
+import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type AgentKind, type PermissionMode } from '@agentpwa/shared';
 import type { DirListing, FolderEntry } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { showToast, useStore } from '../lib/store.ts';
@@ -39,7 +39,7 @@ export function NewProjectForm({
   const usable = (a: AgentKind) => info?.agents[a]?.auth.ok === true;
   const [agent, setAgent] = useState<AgentKind>(() => (usable('claude') || !usable('codex') ? 'claude' : 'codex'));
   const [allowFullAuto, setAllowFullAuto] = useState(false);
-  const [defaultMode, setDefaultMode] = useState<PermissionMode>('ask');
+  const [defaultMode, setDefaultMode] = useState<PermissionMode>(DEFAULT_PERMISSION_MODE);
   const [busy, setBusy] = useState(false);
 
   // 遅れて届いた古い一覧で上書きしないよう、最後に頼んだものだけ使う
@@ -72,7 +72,7 @@ export function NewProjectForm({
   const toggleFullAuto = async (on: boolean) => {
     if (on && !(await confirmFullAuto())) return;
     setAllowFullAuto(on);
-    if (!on && defaultMode === 'full_auto') setDefaultMode('ask');
+    if (!on && defaultMode === 'full_auto') setDefaultMode(DEFAULT_PERMISSION_MODE);
   };
 
   const submit = async () => {

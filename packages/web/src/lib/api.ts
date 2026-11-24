@@ -1,5 +1,5 @@
 // Hub の REST API
-import type { SessionEvent, UserAction } from '@agentpwa/shared';
+import type { SessionEvent, SlashCommand, UserAction } from '@agentpwa/shared';
 import type {
   CreateProjectRequest,
   CreateSessionRequest,
@@ -41,6 +41,8 @@ export const api = {
   stop: (id: string) => req<SessionSummary>('POST', `/api/sessions/${id}/stop`),
   read: (id: string, seq: number) => req<SessionSummary>('POST', `/api/sessions/${id}/read`, { seq }),
   action: (id: string, action: UserAction) => req<{ ok: true }>('POST', `/api/sessions/${id}/action`, action),
+  /** 入力欄のスラッシュコマンドの補完（Hub が CLI に聞くので、初回は数秒かかる） */
+  commands: (id: string) => req<SlashCommand[]>('GET', `/api/sessions/${id}/commands`),
   /** 名前の変更とアーカイブ・解除（アーカイブすると Hub が動いているセッションを止める） */
   update: (id: string, patch: UpdateSessionRequest) => req<SessionSummary>('PATCH', `/api/sessions/${id}`, patch),
   /** 1件ずつ削除する（元に戻せない） */

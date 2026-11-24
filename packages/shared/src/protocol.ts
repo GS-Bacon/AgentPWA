@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -34,11 +34,14 @@ export const USER_TURN_STATUSES: readonly SessionStatus[] = ['waiting_approval',
  * 起動時に StartOptions.permissionMode で決め、実行中も UserAction の set_permission_mode で変えられる。
  */
 export type PermissionMode =
-  | 'ask' // 毎回確認（既定）
+  | 'ask' // 毎回確認
   | 'auto_edit' // ファイル編集は自動、コマンドは確認
   | 'auto' // 自動承認。エージェント側の安全判定が許可を決め、危険と判定した操作だけ止める
   | 'full_auto' // すべて自動で許可（確認しない）。Hub がフォルダごとに許可した場合だけ使える
   | 'plan'; // 計画のみ（変更しない）
+
+/** プロジェクトに既定の権限モードが無いときに使うモード（v7 で 'ask' から 'auto' に変更）。 */
+export const DEFAULT_PERMISSION_MODE: PermissionMode = 'auto';
 
 /** UI での表示順（切り替えメニューの並び）。 */
 export const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto_edit', 'auto', 'full_auto', 'plan'];
@@ -81,6 +84,33 @@ export interface AuthCheck {
   detail?: string;
 }
 
+/**
+ * 送信に添える添付ファイル（v7）。data は base64。
+ * 画像はそのまま画像としてエージェントに渡し、それ以外は Driver がファイルに保存してパスを伝える。
+ */
+export interface Attachment {
+  name: string;
+  /** 例: 'image/png'。分からなければ 'application/octet-stream' */
+  mimeType: string;
+  data: string;
+}
+
+/** 会話の記録に残す添付ファイルの情報（中身は持たない）。 */
+export interface AttachmentInfo {
+  name: string;
+  mimeType: string;
+  /** バイト数 */
+  size: number;
+}
+
+/** スラッシュコマンド（v7）。名前は先頭の / を含まない。 */
+export interface SlashCommand {
+  name: string;
+  description?: string;
+  /** 引数の説明（例: '[low|medium|high]'） */
+  argumentHint?: string;
+}
+
 export type ApprovalKind = 'command' | 'file_change' | 'permission' | 'other';
 
 export type ApprovalDecision =
@@ -102,7 +132,14 @@ export type DriverEvent =
   | { type: 'status'; status: SessionStatus; reason?: string }
   /** アシスタント発話のストリーミング断片。最後に同じ messageId の `message` を送ること。 */
   | { type: 'message_delta'; messageId: string; text: string }
-  | { type: 'message'; messageId: string; role: 'user' | 'assistant'; text: string }
+  | {
+      type: 'message';
+      messageId: string;
+      role: 'user' | 'assistant';
+      text: string;
+      /** ユーザーの発言に添えた添付ファイル（v7。中身は入れない） */
+      attachments?: AttachmentInfo[];
+    }
   | {
       type: 'tool';
       toolId: string;
@@ -170,7 +207,8 @@ export type SessionEvent = DriverEvent & {
 
 /** Hub → Driver の操作。 */
 export type UserAction =
-  | { type: 'send'; text: string }
+  /** 添付ファイルがあれば text は空でもよい（添付は supportsAttachments の Driver だけ） */
+  | { type: 'send'; text: string; attachments?: Attachment[] }
   | { type: 'approve'; requestId: string; decision: ApprovalDecision; note?: string }
   | { type: 'answer'; requestId: string; text: string }
   | { type: 'interrupt' }
@@ -195,6 +233,13 @@ export interface AgentDriver {
    * アーカイブは Hub だけで扱うので、Driver には何も届かない。
    */
   deleteHistory?(target: { cwd: string; resumeToken: string }): Promise<void>;
+  /**
+   * 任意（v7）。作業フォルダで使えるスラッシュコマンドの一覧。Web の入力欄の補完に使う。
+   * 実装しない Driver では補完を出さない（入力した /… はそのまま send で届く）。
+   */
+  listCommands?(cwd: string): Promise<SlashCommand[]>;
+  /** 任意（v7）。添付ファイルを受け付けるか。省略か false なら、Hub は添付つきの send を拒否する */
+  readonly supportsAttachments?: boolean;
 }
 
 export interface DriverSession {

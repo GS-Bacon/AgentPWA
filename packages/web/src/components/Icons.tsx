@@ -31,6 +31,11 @@ export const IconMore = (p: { size?: number }) => (
   <Svg {...p} fill><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></Svg>
 );
 export const IconSend = (p: { size?: number }) => <Svg {...p} sw={2.2}><path d="M12 19V5M5 12l7-7 7 7" /></Svg>;
+export const IconPaperclip = (p: { size?: number }) => (
+  <Svg {...p}><path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" /></Svg>
+);
+export const IconFile = (p: { size?: number }) => <Svg {...p}><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8zM14 3v5h5" /></Svg>;
+export const IconChevron = (p: { size?: number }) => <Svg {...p}><path d="M9 6l6 6-6 6" /></Svg>;
 export const IconStop = (p: { size?: number }) => <Svg {...p} fill><rect x="6" y="6" width="12" height="12" /></Svg>;
 export const IconMaximize = (p: { size?: number }) => <Svg {...p}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></Svg>;
 export const IconSidebar = (p: { size?: number }) => <Svg {...p}><rect x="3" y="4" width="18" height="16" /><path d="M9 4v16" /></Svg>;

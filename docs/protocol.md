@@ -58,7 +58,17 @@ starting ──► running ──► idle ──(send)──► running
 - エージェントに無いエフォート（例: `max`）は、`error`（`fatal: false`）で知らせて元の値のままにする。
 - 動いていないセッションへの `set_model` は Hub が覚えておき（`model` イベントを Hub が記録する）、次に起動・再開するときに `StartOptions` で渡す。
 
-### 3.3 セッションのアーカイブと削除
+### 3.3 添付ファイルとスラッシュコマンド（v7）
+
+- **添付ファイル**: `send` の `attachments`（名前・MIME タイプ・base64 の中身）で届く。添付があれば `text` は空でもよい。受け付ける Driver は `AgentDriver.supportsAttachments` を `true` にする。そうでない Driver のセッションへの添付つきの `send` は、Hub が 400 で断る（Driver には届かない）。
+  - Hub が確かめる上限: 1回の送信で 10 件、合計 20MB（Web は大きな画像を長い辺 2000px までに縮めてから送る）。
+  - Driver は、ユーザーの発言の `message` イベントに `attachments`（名前・MIME タイプ・バイト数。中身は入れない）を付けて送る。Web は発言の下にファイル名を出す。
+  - 変換できない添付（エージェントが受け付けない種類など）は、`send` を例外で失敗させる（Hub が呼び出し元にエラーを返す）。
+- **スラッシュコマンド**: 入力欄の補完のため、Driver は任意で `listCommands(cwd)` を実装する。Hub は `GET /api/sessions/:id/commands` で返し、AI と作業フォルダごとに 5 分覚えておく。実装しない Driver では補完を出さない。
+  - コマンドの実行そのものは `send` の本文（`/compact` など）で届く。どう扱うかは Driver に任せる。
+- Web が添付ボタンや補完を出すかは、`GET /api/info` の `agents.<AI>.attachments` / `commands`（Hub が Driver から求める）で決める。
+
+### 3.4 セッションのアーカイブと削除
 
 - アーカイブと削除は Hub が扱う。Driver に `UserAction` は届かない。
 - Hub は、動いているセッション（`stopped` 以外）をアーカイブ・削除する前に `stop()` を呼ぶ。アーカイブを戻したセッションは `stopped` のままで、次に送信したときに `resumeToken` で再開する。
@@ -84,6 +94,8 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 |---|---|
 | 起動 | `claude -p --output-format stream-json --input-format stream-json --verbose --include-partial-messages --permission-mode <mode> --permission-prompt-tool stdio --allow-dangerously-skip-permissions`。子プロセスは起動役（`local` / `ssh`）を通して起動する（6.6 の v4 までは Driver 内に起動役を持つ）。プロセスは最初の送信で起動し、ターンが終わっても標準入力を開いたまま次の指示を待つ |
 | 送信 | 標準入力に `{"type":"user","message":{"role":"user","content":"…"},"parent_tool_use_id":null}` を1行で書く。実行中に送ったものは CLI 側で次のターンに回る |
+| 添付ファイル | PNG / JPEG / GIF / WebP（3.75MB まで）は `content` を配列にして `{"type":"image","source":{"type":"base64","media_type":…,"data":…}}` で渡す。それ以外は Hub のPCの一時フォルダ（`<tmp>/agentpwa-attachments/<sessionId>/`）に保存し、本文の後ろにパスを書き足して Read ツールで読ませる。このフォルダは起動時に `--add-dir` で渡すので、確認なしで読める。SSH 先のマシン（起動役を差し替えたとき）では画像だけ受け付ける |
+| スラッシュコマンド | 一覧は、CLI を短く起動して制御要求 `{"subtype":"initialize"}` を送り、応答の `commands`（`name` / `description` / `argumentHint`）を使う（API は呼ばない）。`__` で始まる内部用は除く。実行は本文をそのまま送る（`/context` などの出力は、モデル `<synthetic>` の assistant メッセージで届く）。ただし引数つきの `/model <名前>` と `/effort <段階>` は CLI に送らず、`set_model` と同じ処理にする（Hub と Web の表示をそろえるため。`default` / `auto` は既定に戻す） |
 | 許可要求 | `--permission-prompt-tool stdio` で、CLI から標準出力に `{"type":"control_request","request_id":…,"request":{"subtype":"can_use_tool","tool_name","input","tool_use_id",…}}` が届く。これを `approval_request`（`requestId` = tool_use_id）に変換する。決定は標準入力に `{"type":"control_response","response":{"subtype":"success","request_id":…,"response":{"behavior":"allow","updatedInput":…}}}`（拒否は `{"behavior":"deny","message":…}`）で返す。CLI が `control_cancel_request` で取り下げたら、`approval_resolved`（deny）にする。MCP ツールは使わない（SSH 先の CLI から届かないため。docs/architecture.md の 6.4） |
 | allow_session | CLI には渡さず Driver が覚える。シェル（Bash / PowerShell）はコマンドの先頭の語ごと、それ以外はツール名ごとに、以後の問い合わせを自動で許可する |
 | 質問 | `AskUserQuestion` の許可要求を `question` に変換する（選択肢は質問が1つのときだけ `options` に入れる）。回答は `updatedInput.answers = {質問文: 回答}` で返す |
@@ -127,6 +139,13 @@ Codex 担当で、次を対応してください（プロトコル v5。3章6を
 
 `packages/shared` の変更に専用のブランチと PR を作る決まりと、ブランチ名の決まり（`claude/*` / `codex/*` / `protocol/*`）をなくしました（CLAUDE.md と docs/architecture.md は変更済み）。`packages/shared` は直接変えてよく、変えたらこの文書の変更履歴に追記し、相手側の対応が要るものは依頼の節に書きます。AGENTS.md の該当箇所（`packages/shared/**` の項と、ブランチ名の項）を同じ内容に直してください。
 
+### Codex への依頼（添付ファイルとスラッシュコマンド、v7）
+
+Codex 担当で、できるものから対応してください（3.3 を参照。どちらも任意で、対応するまで Web は添付ボタンと補完を出しません）。
+- 添付ファイル: app-server が画像（やファイル）の入力を受け付けるなら、`send` の `attachments` を渡し、`supportsAttachments: true` にする。ユーザーの発言の `message` イベントに `attachments`（中身なし）を付ける
+- スラッシュコマンド: 使えるコマンドの一覧が app-server から取れるなら `listCommands(cwd)` を実装する
+- 権限モードの既定が `DEFAULT_PERMISSION_MODE`（`auto`）になりました。`auto` に当たる設定が無ければ、3章5のとおり `ask` に落としてください
+
 ### Codex への依頼（セッションの削除）
 
 - `deleteHistory` を実装するか決めて、対応表に書いてください。app-server にスレッドを消す（またはアーカイブする）メソッドがあれば使い、なければ実装しなくてよい（Hub の記録だけ消える）。
@@ -152,3 +171,4 @@ Codex 担当で、次を対応してください（プロトコル v5。3章6を
 | 2026-11-24 | 4 | エフォート（`EffortLevel` / `EFFORT_LEVELS`、`StartOptions.effort`）を追加。実行中のモデルとエフォートの切り替え（`UserAction` の `set_model`）と、現在の設定の通知（`DriverEvent` の `model`）を追加（3.2。アーカイブと削除は 3.3 に移動） | Claude |
 | 2026-11-24 | 5 | `tool` イベントに `paths`（ツールの対象ファイルのパス。省略可）を追加（3章6。ファイルビュワー用） | Claude |
 | 2026-11-24 | 6 | `model` イベントに `resolvedModel` / `resolvedEffort`（既定やエイリアスを解決した実際の値。省略可）を追加（3.2）。Codex 側の対応は任意 | Claude |
+| 2026-11-24 | 7 | 添付ファイル（`send` の `attachments`、`message` の `attachments`、`AgentDriver.supportsAttachments`）と、スラッシュコマンドの一覧（`AgentDriver.listCommands`、`SlashCommand`）を追加（3.3。アーカイブと削除は 3.4 に移動）。プロジェクトに既定の権限モードが無いときのモードを `ask` から `auto` に変更（`DEFAULT_PERMISSION_MODE`） | Claude |

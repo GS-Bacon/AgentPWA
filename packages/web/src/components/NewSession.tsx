@@ -1,7 +1,7 @@
 // 新しいセッションの作成フォーム（iPhone は全画面、iPad / Web はダイアログ）。
 // プロジェクト（作業フォルダ）と AI を選んで始める。
 import { useState } from 'react';
-import { PERMISSION_MODES, type AgentKind, type EffortLevel, type PermissionMode } from '@agentpwa/shared';
+import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type AgentKind, type EffortLevel, type PermissionMode } from '@agentpwa/shared';
 import type { FolderEntry, SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { showToast, useStore } from '../lib/store.ts';
@@ -48,7 +48,7 @@ export function NewSessionForm({
   const agent: AgentKind = folder?.agent ?? 'claude';
   const allowFullAuto = folder?.allowFullAuto === true;
   // 権限モードの既定はプロジェクトの設定（defaultPermissionMode）。なければ「毎回確認」
-  const defaultMode = (p: string): PermissionMode => folders.find((f) => f.path === p)?.defaultPermissionMode ?? 'ask';
+  const defaultMode = (p: string): PermissionMode => folders.find((f) => f.path === p)?.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE;
   const [model, setModel] = useState(agent === 'claude' ? last.model ?? '' : '');
   // エフォートは空文字が「既定」
   const [effort, setEffort] = useState<EffortLevel | ''>(last.effort && EFFORTS[agent].includes(last.effort) ? last.effort : '');
@@ -65,7 +65,7 @@ export function NewSessionForm({
     setAddingProject(false);
     setCwdState(f.path);
     if (!MODELS[f.agent].some((m) => m.value === model)) setModel('');
-    setMode(f.defaultPermissionMode ?? 'ask');
+    setMode(f.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE);
   };
   const pickMode = async (m: PermissionMode) => {
     // 「すべて自動」は選ぶときに確認を1回挟む

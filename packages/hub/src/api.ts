@@ -56,7 +56,7 @@ export interface FolderEntry {
   agent: AgentKind;
   /** 「すべて自動」（full_auto）を許すか。省略時は false（Hub が読み込み時に補う） */
   allowFullAuto?: boolean;
-  /** 新しいセッションの既定の権限モード。省略時は 'ask'（Hub が読み込み時に補う） */
+  /** 新しいセッションの既定の権限モード。省略時は 'auto'（DEFAULT_PERMISSION_MODE。Hub が読み込み時に補う） */
   defaultPermissionMode?: PermissionMode;
 }
 
@@ -64,6 +64,10 @@ export interface AgentInfo {
   auth: AuthCheck;
   /** 表示確認用のフェイク Driver で動いているか */
   fake: boolean;
+  /** ファイルを添付できるか（Driver の supportsAttachments） */
+  attachments: boolean;
+  /** スラッシュコマンドの一覧を出せるか（Driver の listCommands） */
+  commands: boolean;
 }
 
 export interface HubInfo {
@@ -133,7 +137,7 @@ export interface CreateSessionRequest {
   /** モデルとエフォート。省略はエージェントの既定（実行中も set_model で変えられる） */
   model?: string;
   effort?: EffortLevel;
-  /** 省略時はプロジェクトの既定（defaultPermissionMode、なければ 'ask'）。full_auto は許可したプロジェクトだけ */
+  /** 省略時はプロジェクトの既定（defaultPermissionMode、なければ DEFAULT_PERMISSION_MODE = 'auto'）。full_auto は許可したプロジェクトだけ */
   permissionMode?: PermissionMode;
   prompt?: string;
   title?: string;

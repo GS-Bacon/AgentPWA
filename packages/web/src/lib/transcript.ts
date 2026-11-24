@@ -1,5 +1,5 @@
 // イベント列から、会話の表示用の項目を組み立てる。
-import type { ApprovalDecision, DriverEvent, PermissionMode, SessionEvent } from '@agentpwa/shared';
+import type { ApprovalDecision, AttachmentInfo, DriverEvent, PermissionMode, SessionEvent } from '@agentpwa/shared';
 import { MODE_LABEL } from './format.ts';
 import { EFFORT_LABEL } from './models.ts';
 
@@ -17,7 +17,7 @@ export interface ToolItem {
 }
 
 export type Item =
-  | { kind: 'user'; key: string; text: string }
+  | { kind: 'user'; key: string; text: string; attachments?: AttachmentInfo[] }
   | { kind: 'assistant'; key: string; text: string; streaming: boolean }
   | { kind: 'tools'; key: string; tools: ToolItem[] }
   | { kind: 'approval'; key: string; req: ApprovalEv; at: string; decision?: ApprovalDecision }
@@ -39,7 +39,7 @@ export function buildItems(events: SessionEvent[]): Item[] {
     switch (ev.type) {
       case 'message': {
         if (ev.role === 'user') {
-          items.push({ kind: 'user', key: `u${ev.seq}`, text: ev.text });
+          items.push({ kind: 'user', key: `u${ev.seq}`, text: ev.text, attachments: ev.attachments });
           break;
         }
         const i = msgIndex.get(ev.messageId);

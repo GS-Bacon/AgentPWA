@@ -80,7 +80,7 @@ describe('フォルダの一覧', () => {
 describe('プロジェクトの作成', () => {
   it('既存のフォルダを登録し、設定ファイルの folders に書き足す', async () => {
     const f = await createProject(deps(), { mode: 'existing', path: path.join(root, 'beta'), agent: 'codex', name: 'ベータ' });
-    expect(f).toMatchObject({ name: 'ベータ', path: path.join(root, 'beta'), agent: 'codex', allowFullAuto: false, defaultPermissionMode: 'ask' });
+    expect(f).toMatchObject({ name: 'ベータ', path: path.join(root, 'beta'), agent: 'codex', allowFullAuto: false, defaultPermissionMode: 'auto' });
     expect(config.folders).toHaveLength(2);
     expect(changed).toBe(1);
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));

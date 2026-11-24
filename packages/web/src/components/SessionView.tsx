@@ -1,15 +1,16 @@
 // セッションの中身（会話・許可要求・入力欄）。iPhone の詳細画面と、iPad / Web のペインで共通に使う。
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { AttachmentInfo } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { loadEvents, run, useStore } from '../lib/store.ts';
-import { isRunning, relPath } from '../lib/format.ts';
+import { relPath } from '../lib/format.ts';
 import { unarchiveSession } from '../lib/sessionActions.ts';
 import { buildItems, type Item, type ToolItem } from '../lib/transcript.ts';
 import { ApprovalCard, QuestionCard } from './Requests.tsx';
-import { IconSend, IconStop } from './Icons.tsx';
-import { PermissionButton, usePermissionSwitch } from './PermissionMode.tsx';
-import { ModelButton } from './ModelSettings.tsx';
+import { IconChevron, IconFile } from './Icons.tsx';
+import { Composer, useFiles } from './Composer.tsx';
+import { formatBytes } from '../lib/attachments.ts';
 import { openFile } from '../lib/viewer.ts';
 import { PathMarkdown } from './PathMarkdown.tsx';
 
@@ -20,7 +21,13 @@ function ToolLine({ t, cwd, sessionId }: { t: ToolItem; cwd: string; sessionId: 
   return (
     <>
       <div className="tool-line">
-        <button onClick={() => t.output && setOpen(!open)} aria-expanded={t.output ? open : undefined} title={t.output ? '出力を表示' : undefined}>
+        <button
+          onClick={() => t.output && setOpen(!open)}
+          aria-expanded={t.output ? open : undefined}
+          title={t.output ? '出力を表示' : undefined}
+          // パスを横に出すときは、ツール名が縮んでパスと重ならないようにする
+          style={file ? { flex: 'none' } : undefined}
+        >
           {mark}
           <span style={{ color: 'var(--fg)' }}>{t.name}</span>
           {!file && <span className="ellipsis">{relPath(t.summary, cwd)}</span>}
@@ -37,18 +44,77 @@ function ToolLine({ t, cwd, sessionId }: { t: ToolItem; cwd: string; sessionId: 
   );
 }
 
+/** ツールの数と種類（例: 「Read 3 · Bash 2」） */
+function toolCounts(tools: ToolItem[]): string {
+  const m = new Map<string, number>();
+  for (const t of tools) m.set(t.name, (m.get(t.name) ?? 0) + 1);
+  return [...m].map(([n, c]) => (c > 1 ? `${n} ${c}` : n)).join(' · ');
+}
+
+/**
+ * 続けて呼ばれたツールを1行にまとめる（デスクトップアプリと同じく、既定は折りたたむ）。
+ * 実行中は、いま動いているツールを横に出す。押すと1件ずつの行が開く。
+ */
+function ToolGroup({ tools, cwd, sessionId }: { tools: ToolItem[]; cwd: string; sessionId: string }) {
+  const [open, setOpen] = useState(false);
+  if (tools.length === 1) return <ToolLine t={tools[0]} cwd={cwd} sessionId={sessionId} />;
+  const runningTool = [...tools].reverse().find((t) => t.state === 'running');
+  const failed = tools.filter((t) => t.state === 'failed').length;
+  return (
+    <>
+      <div className="tool-line tool-group">
+        <button onClick={() => setOpen(!open)} aria-expanded={open} title={open ? '折りたたむ' : '1件ずつ表示'}>
+          <span className={open ? 'chev open' : 'chev'}>
+            <IconChevron size={12} />
+          </span>
+          {runningTool ? <span className="run">…</span> : failed > 0 ? <span className="ng">✗</span> : <span className="ok">✓</span>}
+          <span style={{ color: 'var(--fg)' }}>ツール {tools.length}件</span>
+          <span className="ellipsis">
+            {runningTool && !open ? `${runningTool.name} ${relPath(runningTool.summary, cwd)}` : toolCounts(tools)}
+            {failed > 0 && !runningTool ? `（失敗 ${failed}）` : ''}
+          </span>
+        </button>
+      </div>
+      {open && (
+        <div className="tool-children">
+          {tools.map((t) => (
+            <ToolLine key={t.toolId} t={t} cwd={cwd} sessionId={sessionId} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function AttachmentList({ items }: { items: AttachmentInfo[] }) {
+  return (
+    <div className="msg-attach">
+      {items.map((a, i) => (
+        <span key={i} className="msg-attach-item" title={`${a.name}（${a.mimeType}）`}>
+          <IconFile size={12} />
+          <span className="ellipsis">{a.name}</span>
+          <span className="muted">{formatBytes(a.size)}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function ItemView({ item, session, focused }: { item: Item; session: SessionSummary; focused: boolean }) {
   switch (item.kind) {
     case 'user':
-      return <div className="msg-user">{item.text}</div>;
+      return (
+        <div className="msg-user">
+          {item.text}
+          {item.attachments && item.attachments.length > 0 && <AttachmentList items={item.attachments} />}
+        </div>
+      );
     case 'assistant':
       return <PathMarkdown text={item.text} sessionId={session.id} />;
     case 'tools':
       return (
         <div className="tools">
-          {item.tools.map((t) => (
-            <ToolLine key={t.toolId} t={t} cwd={session.cwd} sessionId={session.id} />
-          ))}
+          <ToolGroup tools={item.tools} cwd={session.cwd} sessionId={session.id} />
         </div>
       );
     case 'approval': {
@@ -76,89 +142,14 @@ function ItemView({ item, session, focused }: { item: Item; session: SessionSumm
   }
 }
 
-function Composer({ session, compact }: { session: SessionSummary; compact?: boolean }) {
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const running = isRunning(session);
-  const stopped = !session.live && (session.status === 'stopped' || session.status === 'error' || session.status === 'idle');
-  const isTouch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
-  const sw = usePermissionSwitch(session);
-  const archived = session.archived;
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight + 2, 160)}px`;
-  }, [text]);
-
-  const send = async () => {
-    const t = text.trim();
-    if (!t || busy) return;
-    setBusy(true);
-    const ok = await run(() => api.action(session.id, { type: 'send', text: t }));
-    setBusy(false);
-    if (ok) setText('');
-  };
-  const interrupt = () => run(() => api.action(session.id, { type: 'interrupt' }));
-
-  const placeholder = archived
-    ? 'アーカイブを解除すると送信できます'
-    : stopped ? (session.resumable ? '送信するとセッションを再開します…' : '送信すると新しく始めます…') : running ? '実行中も追加の指示を送れます…' : '指示を入力…';
-  return (
-    <footer className="composer">
-      {!compact && (
-        <div className="composer-meta">
-          <ModelButton session={session} disabled={archived} />
-        </div>
-      )}
-      <div className="composer-row">
-        <PermissionButton sw={sw} disabled={archived} showShortcut={!isTouch} />
-        <label className="sr-only" htmlFor={`c-${session.id}`}>指示を入力</label>
-        <textarea
-          id={`c-${session.id}`}
-          ref={ref}
-          className="textarea"
-          rows={1}
-          value={text}
-          placeholder={placeholder}
-          disabled={archived}
-          style={{ fontSize: isTouch ? 16 : 14 }}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            // Shift+Tab で権限モードを順に切り替える（「すべて自動」は確認が要るので巡回に入れない）
-            if (e.key === 'Tab' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              sw.cycle();
-              return;
-            }
-            // デスクトップは Enter で送信（Shift+Enter で改行）。iPhone / iPad のソフトキーボードでは改行
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !isTouch) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-        />
-        {running && !text.trim() && !archived ? (
-          <button className="btn btn-icon" style={{ height: 40, width: 40 }} aria-label="中断" title="中断" onClick={interrupt}>
-            <IconStop size={14} />
-          </button>
-        ) : (
-          <button className="btn btn-primary btn-icon" style={{ height: 40, width: 40 }} aria-label="送信" disabled={!text.trim() || busy || archived} onClick={send}>
-            <IconSend size={16} />
-          </button>
-        )}
-      </div>
-    </footer>
-  );
-}
-
 export function SessionView({ session, focused = true, compact = false }: { session: SessionSummary; focused?: boolean; compact?: boolean }) {
   const events = useStore((s) => s.events[session.id]);
   const items = useMemo(() => buildItems(events ?? []), [events]);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const files = useFiles();
+  const [dragging, setDragging] = useState(false);
+  const canAttach = useStore((s) => s.info?.agents[session.agent]?.attachments === true) && !session.archived;
 
   useEffect(() => {
     void loadEvents(session.id);
@@ -189,7 +180,26 @@ export function SessionView({ session, focused = true, compact = false }: { sess
   const shownQuestions = new Set(items.filter((i) => i.kind === 'question').map((i) => (i.kind === 'question' ? i.req.requestId : '')));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: '1 1 auto' }}>
+    <div
+      className={dragging ? 'session-drop dragging' : 'session-drop'}
+      style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: '1 1 auto' }}
+      // ファイルをペインにドロップすると添付する
+      onDragOver={(e) => {
+        if (!canAttach || !e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        if (!dragging) setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!canAttach || e.dataTransfer.files.length === 0) return;
+        e.preventDefault();
+        setDragging(false);
+        files.add([...e.dataTransfer.files]);
+      }}
+    >
       {session.status === 'error' && session.lastError && (
         <div className="banner banner-error">
           <span className="ellipsis" title={session.lastError}>{session.lastError.split('\n')[0]}</span>
@@ -239,7 +249,7 @@ export function SessionView({ session, focused = true, compact = false }: { sess
           {(session.status === 'running' || session.status === 'starting') && <div className="note st-running">● {session.status === 'starting' ? '起動中…' : '作業中…'}</div>}
         </div>
       </div>
-      <Composer session={session} compact={compact} />
+      <Composer session={session} compact={compact} files={files} />
     </div>
   );
 }

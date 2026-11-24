@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { PERMISSION_MODES, type AgentKind } from '@agentpwa/shared';
+import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type AgentKind } from '@agentpwa/shared';
 import type { CreateProjectRequest, DirListing, FolderEntry } from './api.ts';
 import { findAllowedFolder, type HubConfig } from './config.ts';
 import { HttpError } from './sessions.ts';
@@ -159,7 +159,7 @@ async function doCreate(deps: ProjectDeps, b: Partial<CreateProjectRequest>): Pr
     path: dir,
     agent: b.agent,
     allowFullAuto: b.allowFullAuto === true,
-    defaultPermissionMode: b.defaultPermissionMode ?? 'ask',
+    defaultPermissionMode: b.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE,
   };
   await appendFolderToConfig(deps.configPath, entry);
   // 監視による読み直しを待たずに反映する（読み直しでも同じ内容になる）
@@ -174,7 +174,7 @@ export async function appendFolderToConfig(configPath: string, entry: FolderEntr
   const folders = Array.isArray(raw.folders) ? raw.folders : [];
   const item: Record<string, unknown> = { name: entry.name, path: entry.path, agent: entry.agent };
   if (entry.allowFullAuto) item.allowFullAuto = true;
-  if (entry.defaultPermissionMode && entry.defaultPermissionMode !== 'ask') item.defaultPermissionMode = entry.defaultPermissionMode;
+  if (entry.defaultPermissionMode && entry.defaultPermissionMode !== DEFAULT_PERMISSION_MODE) item.defaultPermissionMode = entry.defaultPermissionMode;
   raw.folders = [...folders, item];
   const tmp = `${configPath}.${process.pid}.tmp`;
   await fs.promises.writeFile(tmp, JSON.stringify(raw, null, 2) + '\n');

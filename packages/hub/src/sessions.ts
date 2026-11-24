@@ -1,7 +1,7 @@
 // セッション管理: Driver の起動・停止・再開、イベントの採番・保存・配信。
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { EFFORT_LEVELS, PERMISSION_MODES, type AgentDriver, type AgentKind, type AuthCheck, type DriverEvent, type DriverSession, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
+import { DEFAULT_PERMISSION_MODE, EFFORT_LEVELS, PERMISSION_MODES, type AgentDriver, type AgentKind, type AuthCheck, type DriverEvent, type DriverSession, type PermissionMode, type SessionEvent, type SlashCommand, type UserAction } from '@agentpwa/shared';
 import type { CreateSessionRequest, DeleteSessionResult, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { findAllowedFolder, isModeAllowed, type HubConfig } from './config.ts';
 import type { Store } from './db.ts';
@@ -17,6 +17,8 @@ export class HttpError extends Error {
 }
 
 const AUTH_CACHE_MS = 60_000;
+/** スラッシュコマンドの一覧を覚えておく時間（スキルを足したときなどは、この時間で反映される） */
+const COMMANDS_CACHE_MS = 5 * 60_000;
 
 const MODEL_INVALID = 'モデル名が正しくありません（英数字と . _ - : [ ] だけ、100文字まで）';
 
@@ -42,6 +44,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private starting = new Map<string, Promise<DriverSession>>();
   private usage = new Map<AgentKind, Map<string, UsageInfo>>();
   private authCache = new Map<AgentKind, { at: number; value: AuthCheck }>();
+  /** `${agent}|${cwd}` → スラッシュコマンドの一覧 */
+  private commandCache = new Map<string, { at: number; value: SlashCommand[] }>();
+  private commandLoads = new Map<string, Promise<SlashCommand[]>>();
   private shuttingDown = false;
 
   constructor(
@@ -82,6 +87,42 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return [...(this.usage.get(agent)?.values() ?? [])];
   }
 
+  /**
+   * セッションの作業フォルダで使えるスラッシュコマンド（入力欄の補完用）。
+   * CLI を起動して聞くので時間がかかる。AI と作業フォルダごとに覚えておき、同時の問い合わせは1回にまとめる。
+   * Driver が対応していなければ空。
+   */
+  async commands(id: string): Promise<SlashCommand[]> {
+    const rec = this.mustGet(id);
+    const driver = this.drivers.get(rec.agent);
+    if (!driver?.listCommands) return [];
+    const key = `${rec.agent}|${rec.cwd}`;
+    const cached = this.commandCache.get(key);
+    if (cached && Date.now() - cached.at < COMMANDS_CACHE_MS) return cached.value;
+    const inflight = this.commandLoads.get(key);
+    if (inflight) return inflight;
+    const p = driver
+      .listCommands(rec.cwd)
+      .then((value) => {
+        this.commandCache.set(key, { at: Date.now(), value });
+        return value;
+      })
+      .catch((e: unknown) => {
+        // 前に取れた一覧があれば、古くてもそれを使う
+        if (cached) return cached.value;
+        throw new HttpError(502, `コマンドの一覧を取得できませんでした: ${(e as Error).message}`);
+      })
+      .finally(() => this.commandLoads.delete(key));
+    this.commandLoads.set(key, p);
+    return p;
+  }
+
+  /** Driver が対応している機能（Web が添付ボタンやコマンドの補完を出すかに使う） */
+  features(agent: AgentKind): { attachments: boolean; commands: boolean } {
+    const d = this.drivers.get(agent);
+    return { attachments: d?.supportsAttachments === true, commands: typeof d?.listCommands === 'function' };
+  }
+
   async checkAuth(agent: AgentKind, force = false): Promise<AuthCheck> {
     const driver = this.drivers.get(agent);
     if (!driver) return { ok: false, auth: 'unknown', detail: `${agent} の Driver がありません` };
@@ -100,6 +141,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   /** 設定ファイルが読み直されたことを Web に知らせる */
   notifyConfigChanged(): void {
     this.authCache.clear();
+    this.commandCache.clear();
     // full_auto の許可を外されたプロジェクトで動いているセッションは「毎回確認」に戻す
     for (const [id, s] of this.live) {
       const rec = this.records.get(id);
@@ -120,7 +162,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (req.agent && req.agent !== agent) throw new HttpError(400, `このプロジェクトは ${agent} 用です`);
     const driver = this.drivers.get(agent);
     if (!driver) throw new HttpError(400, `${agent} の Driver がありません`);
-    const permissionMode = req.permissionMode ?? folder.defaultPermissionMode ?? 'ask';
+    const permissionMode = req.permissionMode ?? folder.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE;
     if (!PERMISSION_MODES.includes(permissionMode)) throw new HttpError(400, '権限モードが正しくありません');
     if (!isModeAllowed(this.config, folder.path, permissionMode)) throw new HttpError(403, FULL_AUTO_DENIED);
     const model = req.model?.trim() || undefined;
@@ -167,6 +209,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const rec = this.mustGet(id);
     if (action.type === 'set_permission_mode') return this.setPermissionMode(id, action.mode);
     if (action.type === 'set_model') return this.setModel(id, action);
+    if (action.type === 'send' && action.attachments?.length && !this.drivers.get(rec.agent)?.supportsAttachments) {
+      throw new HttpError(400, `${rec.agent} のセッションでは、まだファイルを添付できません`);
+    }
     let s = this.live.get(id);
     if (!s) {
       if (action.type === 'interrupt') return;

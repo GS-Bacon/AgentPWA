@@ -308,7 +308,7 @@ describe('権限モード', () => {
   it('モードを省略するとプロジェクトの既定で始める', async () => {
     const { manager, store } = setup();
     const a = await manager.create({ cwd: config.folders[0].path });
-    expect(a.permissionMode).toBe('ask');
+    expect(a.permissionMode).toBe('auto');
     const b = await manager.create({ cwd: config.folders[2].path });
     expect(b.permissionMode).toBe('auto_edit');
     store.close();
@@ -423,7 +423,7 @@ describe('設定ファイル', () => {
       { path: path.join(dir, 'b'), allowFullAuto: true, defaultPermissionMode: 'full_auto' },
     ]);
     const { config: c } = loadConfig(file);
-    expect(c.folders[0]).toMatchObject({ agent: 'claude', allowFullAuto: false, defaultPermissionMode: 'ask' });
+    expect(c.folders[0]).toMatchObject({ agent: 'claude', allowFullAuto: false, defaultPermissionMode: 'auto' });
     expect(c.folders[1]).toMatchObject({ allowFullAuto: true, defaultPermissionMode: 'full_auto' });
     expect(isModeAllowed(c, path.join(dir, 'a'), 'full_auto')).toBe(false);
     expect(isModeAllowed(c, path.join(dir, 'a'), 'auto')).toBe(true);

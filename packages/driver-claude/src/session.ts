@@ -9,20 +9,18 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import readline from 'node:readline';
-import { EFFORT_LEVELS, type DriverEvent, type DriverSession, type EffortLevel, type PermissionMode, type SessionStatus, type StartOptions, type UserAction } from '@agentpwa/shared';
+import { EFFORT_LEVELS, type Attachment, type DriverEvent, type DriverSession, type EffortLevel, type PermissionMode, type SessionStatus, type StartOptions, type UserAction } from '@agentpwa/shared';
+import { buildUserContent, type AttachmentStore } from './attachments.ts';
 import type { ProcessLauncher } from './launcher.ts';
 import { StreamMapper } from './mapper.ts';
 import { answerToUpdatedInput, buildPrompt, sessionAllowKey, toClaudePermissionMode } from './permissions.ts';
+import { childEnv, probeControl } from './probe.ts';
 
 /** 中断要求に CLI が応じないとき、プロセスを終了させるまでの待ち時間 */
 const INTERRUPT_TIMEOUT_MS = 5000;
 const STOP_TIMEOUT_MS = 3000;
 /** こちらから送った制御要求（権限モードの切り替えなど）の応答を待つ上限 */
 const CONTROL_TIMEOUT_MS = 15_000;
-/** 既定のモデルとエフォートを調べるために短く起動した CLI を、あきらめて終了させるまでの時間 */
-const PROBE_TIMEOUT_MS = 20_000;
-/** 親の Claude Code から受け継ぐと子の CLI の動作が変わる環境変数 */
-const STRIP_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT'];
 
 /** claude CLI に返す許可の決定（can_use_tool への応答）。 */
 export type PermissionResult =
@@ -53,6 +51,8 @@ export interface ClaudeSessionDeps {
    * プロセスが無いときは CLI を短く起動して聞く（API は呼ばない）。省略時は調べない（テスト用）
    */
   resolveDefaults?: boolean;
+  /** 画像以外の添付ファイルの置き場所。省略時は画像だけ受け付ける */
+  attachments?: AttachmentStore;
 }
 
 /** 既定やエイリアスを解決した、実際に使われるモデルとエフォート */
@@ -63,6 +63,23 @@ interface Resolved {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
+
+/**
+ * Driver が自分で処理するスラッシュコマンド（引数つきの /model と /effort）。
+ * 戻り値は setModel に渡す値（undefined は変えない、null は既定に戻す）。それ以外のコマンドは null（CLI に送る）。
+ */
+export function parseLocalCommand(text: string): { model?: string | null; effort?: EffortLevel | null } | null {
+  const m = /^\/(model|effort)\s+(\S+)\s*$/.exec(text.trim());
+  if (!m) return null;
+  const arg = m[2];
+  const reset = arg === 'default' || arg === 'auto';
+  if (m[1] === 'model') {
+    if (reset) return { model: null };
+    return /^[A-Za-z0-9._:[\]-]{1,100}$/.test(arg) ? { model: arg } : null;
+  }
+  if (reset) return { effort: null };
+  return EFFORT_LEVELS.includes(arg as EffortLevel) ? { effort: arg as EffortLevel } : null;
+}
 
 export class ClaudeSession implements DriverSession {
   private proc: ChildProcessWithoutNullStreams | null = null;
@@ -119,9 +136,17 @@ export class ClaudeSession implements DriverSession {
   async send(action: UserAction): Promise<void> {
     if (this.stopped) throw new Error('セッションは終了しています');
     switch (action.type) {
-      case 'send':
-        this.sendText(action.text);
+      case 'send': {
+        const local = action.attachments?.length ? null : parseLocalCommand(action.text);
+        if (local) {
+          // /model と /effort は、Web の切り替えと同じ扱いにする（CLI に任せると Hub と Web の表示がずれるため）
+          this.emit({ type: 'message', messageId: `u-${Date.now().toString(36)}-${this.msgCounter++}`, role: 'user', text: action.text.trim() });
+          await this.setModel(local.model, local.effort);
+          return;
+        }
+        this.sendText(action.text, action.attachments);
         return;
+      }
       case 'approve': {
         const p = this.pending.get(action.requestId);
         if (!p || p.kind !== 'approval') throw new Error('この許可要求は解決済みです');
@@ -199,10 +224,14 @@ export class ClaudeSession implements DriverSession {
     this.proc?.stdin.write(JSON.stringify(obj) + '\n');
   }
 
-  private sendText(text: string): void {
+  private sendText(text: string, attachments?: Attachment[]): void {
+    // 添付ファイルを変換できなければ、プロセスを起動する前に失敗させる（Hub が呼び出し元にエラーを返す）
+    const { content, infos } = buildUserContent(this.opts.sessionId, text, attachments, this.deps.attachments);
     this.ensureProcess();
-    this.write({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
-    this.emit({ type: 'message', messageId: `u-${Date.now().toString(36)}-${this.msgCounter++}`, role: 'user', text });
+    this.write({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
+    const ev: DriverEvent = { type: 'message', messageId: `u-${Date.now().toString(36)}-${this.msgCounter++}`, role: 'user', text };
+    if (infos.length > 0) ev.attachments = infos;
+    this.emit(ev);
     if (this.status !== 'waiting_approval' && this.status !== 'waiting_input') this.setStatus('running');
   }
 
@@ -222,9 +251,10 @@ export class ClaudeSession implements DriverSession {
     if (this.model) args.push('--model', this.model);
     if (this.effort) args.push('--effort', this.effort);
     if (this.resumeToken) args.push('--resume', this.resumeToken);
+    // 添付ファイルの置き場所を、確認なしで読めるフォルダに加える
+    if (this.deps.attachments) args.push('--add-dir', this.deps.attachments.dir(this.opts.sessionId));
 
-    const env: NodeJS.ProcessEnv = { ...this.deps.env };
-    for (const k of STRIP_ENV) delete env[k];
+    const env = childEnv(this.deps.env);
 
     this.setStatus('starting');
     this.killedOnPurpose = false;
@@ -417,46 +447,10 @@ export class ClaudeSession implements DriverSession {
 
   /** プロセスが無いとき、同じ --model / --effort で CLI を短く起動して get_settings を聞く（ユーザーの指示は送らない）。 */
   private probeSettings(): Promise<Record<string, unknown>> {
-    const args = ['-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose'];
+    const args: string[] = [];
     if (this.model) args.push('--model', this.model);
     if (this.effort) args.push('--effort', this.effort);
-    const env: NodeJS.ProcessEnv = { ...this.deps.env };
-    for (const k of STRIP_ENV) delete env[k];
-    const proc = this.deps.launcher.spawn({ command: this.deps.claudePath, args, cwd: this.opts.cwd, env });
-    const requestId = `agentpwa-probe-${randomUUID()}`;
-    return new Promise((resolve, reject) => {
-      let done = false;
-      const finish = (err: Error | null, res?: Record<string, unknown>) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        proc.stdin.end();
-        // 応答を受けたら待たずに終わらせる（プロセスは入力の終わりでも終了する）
-        if (proc.exitCode === null) proc.kill();
-        if (err) reject(err);
-        else resolve(res ?? {});
-      };
-      const timer = setTimeout(() => finish(new Error('claude CLI から応答がありません')), PROBE_TIMEOUT_MS);
-      proc.on('error', (e) => finish(e));
-      proc.on('exit', () => finish(new Error('claude CLI が終了しました')));
-      proc.stdin.on('error', () => {
-        /* 終了時の EPIPE は exit で扱う */
-      });
-      proc.stderr.resume();
-      readline.createInterface({ input: proc.stdout }).on('line', (line) => {
-        let msg: Json;
-        try {
-          msg = JSON.parse(line);
-        } catch {
-          return;
-        }
-        const r = msg?.type === 'control_response' ? msg.response : undefined;
-        if (!r || r.request_id !== requestId) return;
-        if (r.subtype === 'success') finish(null, r.response ?? {});
-        else finish(new Error(String(r.error ?? '失敗しました')));
-      });
-      proc.stdin.write(JSON.stringify({ type: 'control_request', request_id: requestId, request: { subtype: 'get_settings' } }) + '\n');
-    });
+    return probeControl(this.deps, this.opts.cwd, args, { subtype: 'get_settings' });
   }
 
   /**

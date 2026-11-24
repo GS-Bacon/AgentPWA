@@ -1,6 +1,6 @@
 // 設定（Hub の状態、認証、プロジェクト、表示）
 import { useState } from 'react';
-import type { AgentKind } from '@agentpwa/shared';
+import { DEFAULT_PERMISSION_MODE, type AgentKind } from '@agentpwa/shared';
 import { useStore } from '../lib/store.ts';
 import { resetLayout } from '../lib/layout.ts';
 import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL } from '../lib/format.ts';
@@ -75,7 +75,7 @@ export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
             </span>
             <span className="mono" style={{ fontSize: 12 }}>{f.path}</span>
             <span className="muted" style={{ display: 'block', fontSize: 12 }}>
-              既定の権限モード: {MODE_LABEL[f.defaultPermissionMode ?? 'ask']} ·{' '}
+              既定の権限モード: {MODE_LABEL[f.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE]} ·{' '}
               {f.allowFullAuto ? <span style={{ color: 'var(--attention)' }}>「すべて自動」を許可</span> : '「すべて自動」は不可'}
             </span>
           </Row>
