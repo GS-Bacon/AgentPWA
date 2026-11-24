@@ -179,22 +179,28 @@ kbd {
 .msg-assistant table { border-collapse: collapse; margin: 0 0 0.6em; display: block; overflow-x: auto; }
 .msg-assistant th, .msg-assistant td { border: 1px solid var(--border); padding: 4px 8px; }
 .msg-assistant blockquote { margin: 0 0 0.6em; padding-left: 10px; border-left: 2px solid var(--border); color: var(--fg-muted); }
-.tools { display: flex; flex-direction: column; gap: 3px; font: 12px var(--mono); color: var(--fg-muted); }
+/*
+ * ツールの行・解決済みの許可・お知らせは「読まなくてよいもの」なので、文字を小さく薄くして本文（人が読む返答）から一段下げる。
+ * 触れたときだけ少し明るくする。失敗（✗）と実行中（…）の印だけは色を残す。
+ */
+.tools { display: flex; flex-direction: column; gap: 2px; font: 11.5px var(--mono); color: var(--fg-faint); }
+.transcript > .tools { margin: -4px 0; }
 .tool-line { display: flex; gap: 6px; align-items: baseline; cursor: default; min-width: 0; }
 .tool-line button { all: unset; cursor: pointer; display: flex; gap: 6px; min-width: 0; }
-.tool-line .ok { color: var(--running); }
+.tool-line .ok { color: var(--fg-faint); }
 .tool-line .ng { color: var(--danger); }
 .tool-line .run { color: var(--attention); }
 /* ツール名と件数は縮めず折り返さない（狭いと1文字ずつ縦に並んでしまうため）。長い MCP のツール名だけは末尾を省く */
-.tool-line .tool-name { color: var(--fg); white-space: nowrap; flex-shrink: 0; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
-.tool-out { margin: 2px 0 4px 16px; max-height: 200px; }
+.tool-line .tool-name { color: var(--fg-faint); white-space: nowrap; flex-shrink: 0; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.tool-line button:hover, .tool-line button:hover .tool-name { color: var(--fg-muted); }
+.tool-out { margin: 2px 0 4px 16px; max-height: 200px; color: var(--fg-muted); }
 /* 続けて呼ばれたツールを1行にまとめた行（押すと1件ずつ開く） */
 .tool-group .chev { display: inline-flex; align-self: center; color: var(--fg-faint); transition: transform .1s; }
 .tool-group .chev.open { transform: rotate(90deg); }
 .tool-children { display: flex; flex-direction: column; gap: 3px; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--border); }
-.note { font-size: 12px; color: var(--fg-muted); }
+.note { font-size: 12px; color: var(--fg-faint); }
 .note-error { color: var(--danger); white-space: pre-wrap; }
-.resolved { font: 12px var(--mono); color: var(--fg-muted); }
+.resolved { font: 11.5px var(--mono); color: var(--fg-faint); }
 
 /* 許可・質問のカード（ここだけは囲みを使う：操作が必要なことを示すため） */
 .ask { border: 1px solid var(--attention-border); border-radius: var(--radius); overflow: hidden; }
@@ -377,7 +383,8 @@ a.btn { text-decoration: none; }
 .path-link:hover { text-decoration: underline; }
 .path-link:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
 .msg-assistant code .path-link { color: var(--link); }
-.tool-line .path-link { color: var(--link); display: block; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool-line .path-link { color: var(--fg-faint); display: block; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool-line .path-link:hover { color: var(--link); }
 /* ボタンの all: unset で .ellipsis の指定が消えるので、ツールの行の中では付け直す */
 .tool-line button .ellipsis, .tool-line button.ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
