@@ -5,7 +5,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentDriver, DriverEvent, DriverSession, StartOptions, UserAction } from '@agentpwa/shared';
 import { checkRequest, hostnameOf } from '../src/auth.ts';
-import { findAllowedFolder, type HubConfig } from '../src/config.ts';
+import { findAllowedFolder, isModeAllowed, loadConfig, type HubConfig } from '../src/config.ts';
+import { createFakeDriver } from '../src/fake-driver.ts';
 import { Store } from '../src/db.ts';
 import { SessionManager } from '../src/sessions.ts';
 
@@ -15,7 +16,14 @@ class TestDriver implements AgentDriver {
   auth: Awaited<ReturnType<AgentDriver['checkAuth']>> = { ok: true, auth: 'subscription' };
   starts: StartOptions[] = [];
   actions: UserAction[] = [];
+  stops = 0;
+  deleted: { cwd: string; resumeToken: string }[] = [];
+  deleteError: Error | null = null;
   emit: (e: DriverEvent) => void = () => {};
+  async deleteHistory(target: { cwd: string; resumeToken: string }) {
+    this.deleted.push(target);
+    if (this.deleteError) throw this.deleteError;
+  }
   async checkAuth() {
     return this.auth;
   }
@@ -24,13 +32,18 @@ class TestDriver implements AgentDriver {
     this.emit = emit;
     emit({ type: 'status', status: 'starting' });
     emit({ type: 'resume_token', token: opts.resumeToken ?? `token-${opts.sessionId}` });
+    emit({ type: 'permission_mode', mode: opts.permissionMode });
     emit({ type: 'status', status: opts.initialPrompt ? 'running' : 'idle' });
     return {
       send: async (a) => {
         this.actions.push(a);
         if (a.type === 'send') emit({ type: 'status', status: 'running' });
+        if (a.type === 'set_permission_mode') emit({ type: 'permission_mode', mode: a.mode });
       },
-      stop: async () => emit({ type: 'status', status: 'stopped' }),
+      stop: async () => {
+        this.stops++;
+        emit({ type: 'status', status: 'stopped' });
+      },
     };
   }
 }
@@ -48,6 +61,7 @@ beforeEach(() => {
     folders: [
       { name: 'proj', path: path.join(dir, 'proj'), agent: 'claude' },
       { name: 'cx', path: path.join(dir, 'cx'), agent: 'codex' },
+      { name: 'free', path: path.join(dir, 'free'), agent: 'claude', allowFullAuto: true, defaultPermissionMode: 'auto_edit' },
     ],
     codex: 'fake',
     dataDir: dir,
@@ -164,6 +178,208 @@ describe('SessionManager', () => {
     await first.manager.stop(s.id);
     await expect(first.manager.action(s.id, { type: 'approve', requestId: 'x', decision: 'allow' })).rejects.toThrow('動いていません');
     first.store.close();
+  });
+});
+
+describe('権限モード', () => {
+  it('Driver の permission_mode を現在のモードとして保存し、再起動後も残る', async () => {
+    const first = setup();
+    const s = await first.manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
+    expect(first.manager.get(s.id).permissionMode).toBe('ask');
+    // エージェント自身がモードを変えた（例: 計画モードの終了）ときも追う
+    first.driver.emit({ type: 'permission_mode', mode: 'plan' });
+    expect(first.manager.get(s.id).permissionMode).toBe('plan');
+    first.store.close();
+
+    const second = setup(new TestDriver());
+    expect(second.manager.get(s.id).permissionMode).toBe('plan');
+    // 次の再開では、保存したモードを渡す
+    await second.manager.action(s.id, { type: 'send', text: '続けて' });
+    expect(second.driver.starts[0].permissionMode).toBe('plan');
+    second.store.close();
+  });
+
+  it('set_permission_mode を Driver に渡し、反映されたモードになる', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
+    await manager.action(s.id, { type: 'set_permission_mode', mode: 'auto' });
+    expect(driver.actions).toContainEqual({ type: 'set_permission_mode', mode: 'auto' });
+    expect(manager.get(s.id).permissionMode).toBe('auto');
+    store.close();
+  });
+
+  it('切り替えに失敗したら（error のみで permission_mode が来なければ）元のモードのまま', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'auto_edit', prompt: 'hi' });
+    driver.emit({ type: 'error', message: 'このプランでは自動承認を使えません', fatal: false });
+    expect(manager.get(s.id).permissionMode).toBe('auto_edit');
+    store.close();
+  });
+
+  it('止まっているセッションのモードは Hub が覚えて、次の起動で渡す', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
+    await manager.stop(s.id);
+    await manager.action(s.id, { type: 'set_permission_mode', mode: 'auto_edit' });
+    expect(manager.get(s.id).permissionMode).toBe('auto_edit');
+    expect(manager.get(s.id).live).toBe(false);
+    await manager.action(s.id, { type: 'send', text: '再開' });
+    expect(driver.starts[1].permissionMode).toBe('auto_edit');
+    store.close();
+  });
+
+  it('full_auto は許可したプロジェクトでだけ使え、それ以外は Driver に渡さない', async () => {
+    const { manager, store, driver } = setup();
+    // 起動時
+    await expect(manager.create({ cwd: config.folders[0].path, permissionMode: 'full_auto' })).rejects.toThrow('すべて自動');
+    expect(driver.starts).toHaveLength(0);
+    // 切り替え
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
+    await expect(manager.action(s.id, { type: 'set_permission_mode', mode: 'full_auto' })).rejects.toThrow('すべて自動');
+    expect(driver.actions.some((a) => a.type === 'set_permission_mode')).toBe(false);
+    expect(manager.get(s.id).permissionMode).toBe('ask');
+    // auto（自動承認）はフォルダの制限なし
+    await manager.action(s.id, { type: 'set_permission_mode', mode: 'auto' });
+    expect(manager.get(s.id).permissionMode).toBe('auto');
+
+    // 許可したプロジェクトでは使える
+    const f = await manager.create({ cwd: config.folders[2].path, permissionMode: 'full_auto', prompt: 'hi' });
+    expect(driver.starts[driver.starts.length - 1].permissionMode).toBe('full_auto');
+    expect(manager.get(f.id).permissionMode).toBe('full_auto');
+    store.close();
+  });
+
+  it('モードを省略するとプロジェクトの既定で始める', async () => {
+    const { manager, store } = setup();
+    const a = await manager.create({ cwd: config.folders[0].path });
+    expect(a.permissionMode).toBe('ask');
+    const b = await manager.create({ cwd: config.folders[2].path });
+    expect(b.permissionMode).toBe('auto_edit');
+    store.close();
+  });
+
+  it('full_auto の許可が外れたプロジェクトのセッションは、再開時に「毎回確認」で起動する', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[2].path, permissionMode: 'full_auto' });
+    await manager.stop(s.id);
+    config.folders[2] = { ...config.folders[2], allowFullAuto: false };
+    await manager.action(s.id, { type: 'send', text: '再開' });
+    expect(driver.starts[1].permissionMode).toBe('ask');
+    expect(manager.get(s.id).permissionMode).toBe('ask');
+    store.close();
+  });
+
+  it('フェイク Driver: 起動時と切り替え時に permission_mode を送り、deleteHistory を記録する', async () => {
+    const fx = path.join(dir, 'fx');
+    fs.mkdirSync(fx);
+    fs.writeFileSync(path.join(fx, '01.jsonl'), '{"type":"status","status":"idle"}\n');
+    const fake = createFakeDriver({ kind: 'claude', fixturesDir: fx, delayMs: 0 });
+    const events: DriverEvent[] = [];
+    const s = await fake.start({ sessionId: 'x', cwd: dir, permissionMode: 'plan' }, (e) => events.push(e));
+    expect(events[0]).toEqual({ type: 'permission_mode', mode: 'plan' });
+    await s.send({ type: 'set_permission_mode', mode: 'auto' });
+    expect(events).toContainEqual({ type: 'permission_mode', mode: 'auto' });
+    await s.stop();
+    await fake.deleteHistory!({ cwd: dir, resumeToken: 't' });
+    expect(fake.deletedHistories).toEqual([{ cwd: dir, resumeToken: 't' }]);
+  });
+});
+
+describe('アーカイブと削除', () => {
+  it('アーカイブは動いているセッションを止め、解除しても stopped のまま。送信で resume_token から再開する', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
+    expect(manager.get(s.id).status).toBe('running');
+    const archived = await manager.update(s.id, { archived: true });
+    expect(driver.stops).toBe(1);
+    expect(archived).toMatchObject({ archived: true, status: 'stopped', live: false });
+    // アーカイブ中は送信・再開できない
+    await expect(manager.action(s.id, { type: 'send', text: 'x' })).rejects.toThrow('アーカイブ');
+    await expect(manager.resume(s.id)).rejects.toThrow('アーカイブ');
+
+    const restored = await manager.update(s.id, { archived: false });
+    expect(restored).toMatchObject({ archived: false, status: 'stopped' });
+    await manager.action(s.id, { type: 'send', text: '続けて' });
+    expect(driver.starts[1].resumeToken).toBe(`token-${s.id}`);
+    store.close();
+  });
+
+  it('止まっているセッションのアーカイブでは stop を呼ばない', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
+    await manager.stop(s.id);
+    expect(driver.stops).toBe(1);
+    await manager.update(s.id, { archived: true });
+    expect(driver.stops).toBe(1);
+    store.close();
+  });
+
+  it('削除は止めてから Hub の記録を消し、deleteHistory に cwd と resume_token を渡す', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
+    const removed: string[] = [];
+    manager.on('removed', (id) => removed.push(id));
+    const r = await manager.remove(s.id);
+    expect(r).toEqual({ ok: true });
+    expect(driver.stops).toBe(1);
+    expect(driver.deleted).toEqual([{ cwd: config.folders[0].path, resumeToken: `token-${s.id}` }]);
+    expect(removed).toEqual([s.id]);
+    expect(() => manager.get(s.id)).toThrow('見つかりません');
+    expect(store.eventsAfter(s.id, 0)).toEqual([]);
+    expect(store.loadSessions()).toEqual([]);
+    store.close();
+  });
+
+  it('deleteHistory が失敗しても Hub 側の削除は取り消さず、理由を返す', async () => {
+    const driver = new TestDriver();
+    driver.deleteError = new Error('履歴のファイルを消せませんでした');
+    const { manager, store } = setup(driver);
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
+    const r = await manager.remove(s.id);
+    expect(r).toEqual({ ok: true, historyError: '履歴のファイルを消せませんでした' });
+    expect(manager.list()).toEqual([]);
+    expect(store.loadSessions()).toEqual([]);
+    store.close();
+  });
+
+  it('削除したセッションは Hub を再起動しても戻らない', async () => {
+    const first = setup();
+    const keep = await first.manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
+    const gone = await first.manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
+    await first.manager.remove(gone.id);
+    first.store.close();
+    const second = setup(new TestDriver());
+    expect(second.manager.list().map((s) => s.id)).toEqual([keep.id]);
+    second.store.close();
+  });
+});
+
+describe('設定ファイル', () => {
+  const write = (folders: unknown[]) => {
+    const file = path.join(dir, 'config.json');
+    fs.writeFileSync(file, JSON.stringify({ folders }));
+    return file;
+  };
+
+  it('allowFullAuto と defaultPermissionMode を補い、full_auto の可否を判定する', () => {
+    const file = write([
+      { path: path.join(dir, 'a') },
+      { path: path.join(dir, 'b'), allowFullAuto: true, defaultPermissionMode: 'full_auto' },
+    ]);
+    const { config: c } = loadConfig(file);
+    expect(c.folders[0]).toMatchObject({ agent: 'claude', allowFullAuto: false, defaultPermissionMode: 'ask' });
+    expect(c.folders[1]).toMatchObject({ allowFullAuto: true, defaultPermissionMode: 'full_auto' });
+    expect(isModeAllowed(c, path.join(dir, 'a'), 'full_auto')).toBe(false);
+    expect(isModeAllowed(c, path.join(dir, 'a'), 'auto')).toBe(true);
+    expect(isModeAllowed(c, path.join(dir, 'b'), 'full_auto')).toBe(true);
+    expect(isModeAllowed(c, path.join(dir, 'other'), 'full_auto')).toBe(false);
+  });
+
+  it('許可していないプロジェクトの既定を full_auto にはできない', () => {
+    const file = write([{ path: path.join(dir, 'a'), defaultPermissionMode: 'full_auto' }]);
+    expect(() => loadConfig(file)).toThrow('allowFullAuto');
+    const bad = write([{ path: path.join(dir, 'a'), defaultPermissionMode: 'yolo' }]);
+    expect(() => loadConfig(bad)).toThrow('defaultPermissionMode');
   });
 });
 

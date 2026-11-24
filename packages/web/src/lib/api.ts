@@ -1,6 +1,6 @@
 // Hub の REST API
 import type { SessionEvent, UserAction } from '@agentpwa/shared';
-import type { CreateSessionRequest, HubInfo, SessionSummary } from '@agentpwa/hub/api';
+import type { CreateSessionRequest, DeleteSessionResult, HubInfo, SessionSummary, UpdateSessionRequest } from '@agentpwa/hub/api';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -31,5 +31,8 @@ export const api = {
   stop: (id: string) => req<SessionSummary>('POST', `/api/sessions/${id}/stop`),
   read: (id: string, seq: number) => req<SessionSummary>('POST', `/api/sessions/${id}/read`, { seq }),
   action: (id: string, action: UserAction) => req<{ ok: true }>('POST', `/api/sessions/${id}/action`, action),
-  update: (id: string, patch: { title?: string; archived?: boolean }) => req<SessionSummary>('PATCH', `/api/sessions/${id}`, patch),
+  /** 名前の変更とアーカイブ・解除（アーカイブすると Hub が動いているセッションを止める） */
+  update: (id: string, patch: UpdateSessionRequest) => req<SessionSummary>('PATCH', `/api/sessions/${id}`, patch),
+  /** 1件ずつ削除する（元に戻せない） */
+  remove: (id: string) => req<DeleteSessionResult>('DELETE', `/api/sessions/${id}`),
 };

@@ -5,10 +5,12 @@ import remarkGfm from 'remark-gfm';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { loadEvents, run, useStore } from '../lib/store.ts';
-import { MODE_LABEL, relPath } from '../lib/format.ts';
+import { relPath } from '../lib/format.ts';
+import { unarchiveSession } from '../lib/sessionActions.ts';
 import { buildItems, type Item, type ToolItem } from '../lib/transcript.ts';
 import { ApprovalCard, QuestionCard } from './Requests.tsx';
 import { IconSend, IconStop } from './Icons.tsx';
+import { PermissionButton, usePermissionSwitch } from './PermissionMode.tsx';
 
 const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
@@ -81,6 +83,8 @@ function Composer({ session, compact }: { session: SessionSummary; compact?: boo
   const running = session.status === 'running' || session.status === 'starting' || session.status === 'waiting_approval' || session.status === 'waiting_input';
   const stopped = !session.live && (session.status === 'stopped' || session.status === 'error' || session.status === 'idle');
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+  const sw = usePermissionSwitch(session);
+  const archived = session.archived;
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -99,16 +103,18 @@ function Composer({ session, compact }: { session: SessionSummary; compact?: boo
   };
   const interrupt = () => run(() => api.action(session.id, { type: 'interrupt' }));
 
-  const placeholder = stopped ? (session.resumable ? '送信するとセッションを再開します…' : '送信すると新しく始めます…') : running ? '実行中も追加の指示を送れます…' : '指示を入力…';
+  const placeholder = archived
+    ? 'アーカイブを解除すると送信できます'
+    : stopped ? (session.resumable ? '送信するとセッションを再開します…' : '送信すると新しく始めます…') : running ? '実行中も追加の指示を送れます…' : '指示を入力…';
   return (
     <footer className="composer">
-      {!compact && (
+      {!compact && session.model && (
         <div className="composer-meta">
-          <span className="tag">{MODE_LABEL[session.permissionMode]}</span>
-          {session.model && <span className="tag">{session.model}</span>}
+          <span className="tag">{session.model}</span>
         </div>
       )}
       <div className="composer-row">
+        <PermissionButton sw={sw} disabled={archived} showShortcut={!isTouch} />
         <label className="sr-only" htmlFor={`c-${session.id}`}>指示を入力</label>
         <textarea
           id={`c-${session.id}`}
@@ -117,9 +123,16 @@ function Composer({ session, compact }: { session: SessionSummary; compact?: boo
           rows={1}
           value={text}
           placeholder={placeholder}
+          disabled={archived}
           style={{ fontSize: isTouch ? 16 : 14 }}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
+            // Shift+Tab で権限モードを順に切り替える（「すべて自動」は確認が要るので巡回に入れない）
+            if (e.key === 'Tab' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              sw.cycle();
+              return;
+            }
             // デスクトップは Enter で送信（Shift+Enter で改行）。iPhone / iPad のソフトキーボードでは改行
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !isTouch) {
               e.preventDefault();
@@ -127,12 +140,12 @@ function Composer({ session, compact }: { session: SessionSummary; compact?: boo
             }
           }}
         />
-        {running && !text.trim() ? (
+        {running && !text.trim() && !archived ? (
           <button className="btn btn-icon" style={{ height: 40, width: 40 }} aria-label="中断" title="中断" onClick={interrupt}>
             <IconStop size={14} />
           </button>
         ) : (
-          <button className="btn btn-primary btn-icon" style={{ height: 40, width: 40 }} aria-label="送信" disabled={!text.trim() || busy} onClick={send}>
+          <button className="btn btn-primary btn-icon" style={{ height: 40, width: 40 }} aria-label="送信" disabled={!text.trim() || busy || archived} onClick={send}>
             <IconSend size={16} />
           </button>
         )}
@@ -182,7 +195,15 @@ export function SessionView({ session, focused = true, compact = false }: { sess
           <span className="ellipsis" title={session.lastError}>{session.lastError.split('\n')[0]}</span>
         </div>
       )}
-      {session.status === 'stopped' && (
+      {session.archived && (
+        <div className="banner banner-info">
+          <span>アーカイブ済みのセッションです（読むことはできます）</span>
+          <button className="btn" style={{ height: 28 }} onClick={() => void unarchiveSession(session.id)}>
+            アーカイブを解除
+          </button>
+        </div>
+      )}
+      {session.status === 'stopped' && !session.archived && (
         <div className="banner banner-info">
           <span>{session.statusReason ?? '停止しています'}</span>
           {session.resumable && (

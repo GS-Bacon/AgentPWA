@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { PERMISSION_MODES, type PermissionMode } from '@agentpwa/shared';
 import type { FolderEntry } from './api.ts';
 
 export interface HubConfig {
@@ -57,11 +58,25 @@ function validate(c: HubConfig, file: string): HubConfig {
   if (c.codex !== 'fake' && c.codex !== 'driver') errors.push("codex は 'fake' か 'driver' にしてください");
   if (errors.length) throw new Error(`設定ファイル ${file} の誤り:\n- ${errors.join('\n- ')}`);
   for (const f of c.folders ?? []) {
-    if (f && f.agent !== undefined && f.agent !== 'claude' && f.agent !== 'codex') errors.push(`folders の agent は 'claude' か 'codex' にしてください: ${f.name ?? f.path}`);
+    const label = f.name ?? f.path;
+    if (f.agent !== undefined && f.agent !== 'claude' && f.agent !== 'codex') errors.push(`folders の agent は 'claude' か 'codex' にしてください: ${label}`);
+    if (f.allowFullAuto !== undefined && typeof f.allowFullAuto !== 'boolean') errors.push(`folders の allowFullAuto は true か false にしてください: ${label}`);
+    if (f.defaultPermissionMode !== undefined && !PERMISSION_MODES.includes(f.defaultPermissionMode)) {
+      errors.push(`folders の defaultPermissionMode は ${PERMISSION_MODES.map((m) => `'${m}'`).join(' / ')} のどれかにしてください: ${label}`);
+    }
+    if (f.defaultPermissionMode === 'full_auto' && f.allowFullAuto !== true) {
+      errors.push(`defaultPermissionMode を 'full_auto' にするには allowFullAuto: true が必要です: ${label}`);
+    }
   }
   if (errors.length) throw new Error(`設定ファイル ${file} の誤り:\n- ${errors.join('\n- ')}`);
-  // agent を省略したプロジェクトは Claude とする
-  c.folders = c.folders.map((f) => ({ name: f.name || path.basename(f.path), path: path.resolve(f.path), agent: f.agent ?? 'claude' }));
+  // agent を省略したプロジェクトは Claude、full_auto は許さない、既定の権限モードは「毎回確認」とする
+  c.folders = c.folders.map((f) => ({
+    name: f.name || path.basename(f.path),
+    path: path.resolve(f.path),
+    agent: f.agent ?? 'claude',
+    allowFullAuto: f.allowFullAuto === true,
+    defaultPermissionMode: f.defaultPermissionMode ?? 'ask',
+  }));
   return c;
 }
 
@@ -89,6 +104,15 @@ function norm(p: string): string {
 export function findAllowedFolder(config: HubConfig, cwd: string): FolderEntry | undefined {
   const target = norm(cwd);
   return config.folders.find((f) => norm(f.path) === target);
+}
+
+/**
+ * このフォルダのセッションで、その権限モードを使ってよいか。
+ * full_auto は、許可リストで allowFullAuto: true にしたフォルダだけ。それ以外のモードは制限しない。
+ */
+export function isModeAllowed(config: HubConfig, cwd: string, mode: PermissionMode): boolean {
+  if (mode !== 'full_auto') return true;
+  return findAllowedFolder(config, cwd)?.allowFullAuto === true;
 }
 
 /**

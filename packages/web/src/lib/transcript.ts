@@ -1,5 +1,6 @@
 // イベント列から、会話の表示用の項目を組み立てる。
-import type { ApprovalDecision, DriverEvent, SessionEvent } from '@agentpwa/shared';
+import type { ApprovalDecision, DriverEvent, PermissionMode, SessionEvent } from '@agentpwa/shared';
+import { MODE_LABEL } from './format.ts';
 
 type ApprovalEv = Extract<DriverEvent, { type: 'approval_request' }>;
 type QuestionEv = Extract<DriverEvent, { type: 'question' }>;
@@ -27,6 +28,7 @@ export function buildItems(events: SessionEvent[]): Item[] {
   const toolIndex = new Map<string, { item: number; tool: number }>();
   const approvalIndex = new Map<string, number>();
   const questionIndex = new Map<string, number>();
+  let mode: PermissionMode | undefined;
 
   for (const ev of events) {
     switch (ev.type) {
@@ -102,6 +104,11 @@ export function buildItems(events: SessionEvent[]): Item[] {
         break;
       case 'error':
         items.push({ kind: 'error', key: `e${ev.seq}`, text: ev.message });
+        break;
+      case 'permission_mode':
+        // 起動・再開のたびに同じモードが届くので、変わったときだけ出す
+        if (mode !== undefined && ev.mode !== mode) items.push({ kind: 'note', key: `m${ev.seq}`, text: `権限モードを「${MODE_LABEL[ev.mode]}」にしました` });
+        mode = ev.mode;
         break;
       default:
         break;

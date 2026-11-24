@@ -1,11 +1,12 @@
 // 新しいセッションの作成フォーム（iPhone は全画面、iPad / Web はダイアログ）。
 // プロジェクト（作業フォルダ）と AI を選んで始める。
 import { useState } from 'react';
-import type { AgentKind, PermissionMode } from '@agentpwa/shared';
+import { PERMISSION_MODES, type AgentKind, type PermissionMode } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { showToast, useStore } from '../lib/store.ts';
-import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL } from '../lib/format.ts';
+import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL, MODE_NOTE } from '../lib/format.ts';
+import { confirmFullAuto } from '../lib/sessionActions.ts';
 import { AgentIcon, IconClose } from './Icons.tsx';
 
 const MODELS: Record<AgentKind, { value: string; label: string }[]> = {
@@ -21,7 +22,7 @@ const MODELS: Record<AgentKind, { value: string; label: string }[]> = {
 
 const LAST_KEY = 'agentpwa.newSession.v1';
 
-function loadLast(): { cwd?: string; model?: string; mode?: PermissionMode } {
+function loadLast(): { cwd?: string; model?: string } {
   try {
     return JSON.parse(localStorage.getItem(LAST_KEY) ?? '{}');
   } catch {
@@ -48,14 +49,24 @@ export function NewSessionForm({
     return folders.find((f) => f.path.toLowerCase() === want)?.path ?? folders[0]?.path ?? '';
   });
   // AI はプロジェクトごとに固定（Hub の設定ファイルの folders の agent）
-  const agent: AgentKind = folders.find((f) => f.path === cwd)?.agent ?? 'claude';
+  const folder = folders.find((f) => f.path === cwd);
+  const agent: AgentKind = folder?.agent ?? 'claude';
+  const allowFullAuto = folder?.allowFullAuto === true;
+  // 権限モードの既定はプロジェクトの設定（defaultPermissionMode）。なければ「毎回確認」
+  const defaultMode = (p: string): PermissionMode => folders.find((f) => f.path === p)?.defaultPermissionMode ?? 'ask';
   const [model, setModel] = useState(agent === 'claude' ? last.model ?? '' : '');
   const setCwd = (p: string) => {
     setCwdState(p);
     const a = folders.find((f) => f.path === p)?.agent ?? 'claude';
     if (!MODELS[a].some((m) => m.value === model)) setModel('');
+    setMode(defaultMode(p));
   };
-  const [mode, setMode] = useState<PermissionMode>(last.mode ?? 'ask');
+  const [mode, setMode] = useState<PermissionMode>(() => defaultMode(cwd));
+  const pickMode = async (m: PermissionMode) => {
+    // 「すべて自動」は選ぶときに確認を1回挟む
+    if (m === 'full_auto' && !(await confirmFullAuto())) return;
+    setMode(m);
+  };
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
   const auth = info?.agents[agent]?.auth;
@@ -67,7 +78,7 @@ export function NewSessionForm({
     try {
       const s = await api.create({ cwd, model: model || undefined, permissionMode: mode, prompt: prompt.trim() || undefined });
       try {
-        localStorage.setItem(LAST_KEY, JSON.stringify({ cwd, model, mode }));
+        localStorage.setItem(LAST_KEY, JSON.stringify({ cwd, model }));
       } catch {
         /* noop */
       }
@@ -130,15 +141,22 @@ export function NewSessionForm({
         </label>
         <label className="field">
           権限モード
-          <select className="select" value={mode} onChange={(e) => setMode(e.target.value as PermissionMode)}>
-            {(Object.keys(MODE_LABEL) as PermissionMode[]).map((m) => (
-              <option key={m} value={m}>
+          <select className="select" value={mode} onChange={(e) => void pickMode(e.target.value as PermissionMode)} style={mode === 'full_auto' ? { color: 'var(--attention)' } : undefined}>
+            {PERMISSION_MODES.map((m) => (
+              <option key={m} value={m} disabled={m === 'full_auto' && !allowFullAuto}>
                 {MODE_LABEL[m]}
+                {m === 'full_auto' && !allowFullAuto ? '（このプロジェクトでは不可）' : ''}
               </option>
             ))}
           </select>
         </label>
       </div>
+      {MODE_NOTE[mode] && (
+        <p style={{ padding: '6px 16px 0', fontSize: 12, color: mode === 'full_auto' ? 'var(--attention)' : 'var(--fg-muted)' }}>
+          {mode === 'full_auto' ? '⚠ ' : ''}
+          {MODE_LABEL[mode]}: {MODE_NOTE[mode]}
+        </p>
+      )}
       <label className="field" style={{ padding: '14px 16px 16px' }}>
         最初の指示
         <textarea

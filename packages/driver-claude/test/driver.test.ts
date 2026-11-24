@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { detectApiKeyEnv, mapAuthMethod } from '../src/auth.ts';
 import { StreamMapper } from '../src/mapper.ts';
-import { answerToUpdatedInput, buildPrompt, sessionAllowKey, summarizeTool, toClaudePermissionMode } from '../src/permissions.ts';
+import { answerToUpdatedInput, buildPrompt, fromClaudePermissionMode, sessionAllowKey, summarizeTool, toClaudePermissionMode } from '../src/permissions.ts';
+import { projectDirName } from '../src/index.ts';
 
 describe('auth', () => {
   it('authMethod をプロトコルの auth に対応付ける', () => {
@@ -27,7 +28,21 @@ describe('permissions', () => {
   it('権限モードを claude の値に対応付ける', () => {
     expect(toClaudePermissionMode('ask')).toBe('default');
     expect(toClaudePermissionMode('auto_edit')).toBe('acceptEdits');
+    expect(toClaudePermissionMode('auto')).toBe('auto');
+    expect(toClaudePermissionMode('full_auto')).toBe('bypassPermissions');
     expect(toClaudePermissionMode('plan')).toBe('plan');
+  });
+
+  it('claude の権限モードをプロトコルの値に戻す', () => {
+    for (const m of ['ask', 'auto_edit', 'auto', 'full_auto', 'plan'] as const) {
+      expect(fromClaudePermissionMode(toClaudePermissionMode(m))).toBe(m);
+    }
+    expect(fromClaudePermissionMode('dontAsk')).toBeUndefined();
+  });
+
+  it('履歴フォルダ名は英数字以外を - にする', () => {
+    expect(projectDirName(String.raw`C:\Users\me\work`)).toBe('C--Users-me-work');
+    expect(projectDirName('/home/me/my_app')).toBe('-home-me-my-app');
   });
 
   it('Bash は command の承認要求になる', () => {
@@ -65,6 +80,12 @@ describe('StreamMapper', () => {
     const r = m.map({ type: 'system', subtype: 'init', session_id: 'abc', apiKeySource: 'none' });
     expect(r.events).toEqual([{ type: 'resume_token', token: 'abc' }]);
     expect(r.init).toMatchObject({ sessionId: 'abc', apiKeySource: 'none' });
+  });
+
+  it('system/init と system/status の permissionMode を返す', () => {
+    const m = new StreamMapper();
+    expect(m.map({ type: 'system', subtype: 'init', session_id: 'abc', permissionMode: 'acceptEdits' }).permissionMode).toBe('auto_edit');
+    expect(m.map({ type: 'system', subtype: 'status', status: null, permissionMode: 'default' }).permissionMode).toBe('ask');
   });
 
   it('ストリーミング断片と完成版のメッセージが同じ messageId になる', () => {

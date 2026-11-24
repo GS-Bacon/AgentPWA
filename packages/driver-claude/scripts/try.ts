@@ -1,9 +1,10 @@
 // Hub なしで Claude Driver を試す簡易ツール。
 //
-//   npm run try -w @agentpwa/driver-claude -- --cwd <フォルダ> [--model haiku] [--mode ask|auto_edit|plan] [--resume <id>] [最初の指示]
+//   npm run try -w @agentpwa/driver-claude -- --cwd <フォルダ> [--model haiku] [--mode ask|auto_edit|auto|full_auto|plan] [--resume <id>] [最初の指示]
 //
 // 標準入力から UserAction を 1 行 1 件の JSON で受け取り、DriverEvent を 1 行 1 件の JSON（JSONL）で標準出力に出す。
 // 例: {"type":"send","text":"こんにちは"} / {"type":"approve","requestId":"toolu_...","decision":"allow"} / {"type":"interrupt"}
+//     {"type":"set_permission_mode","mode":"auto_edit"}
 // 標準入力を閉じるとセッションを停止して終了する。
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';

@@ -2,7 +2,7 @@
 import type { AgentKind } from '@agentpwa/shared';
 import { useStore } from '../lib/store.ts';
 import { resetLayout } from '../lib/layout.ts';
-import { AGENT_COLOR, AGENT_LABEL } from '../lib/format.ts';
+import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL } from '../lib/format.ts';
 import { UsageBars } from './common.tsx';
 import { AgentIcon } from './Icons.tsx';
 
@@ -24,7 +24,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-export function Settings({ showArchived, setShowArchived }: { showArchived: boolean; setShowArchived: (v: boolean) => void }) {
+export function Settings() {
   const info = useStore((s) => s.info);
   const connected = useStore((s) => s.connected);
   const usage = useStore((s) => s.usage);
@@ -65,17 +65,17 @@ export function Settings({ showArchived, setShowArchived }: { showArchived: bool
               <AgentIcon agent={f.agent} /> {AGENT_LABEL[f.agent]}
             </span>
             <span className="mono" style={{ fontSize: 12 }}>{f.path}</span>
+            <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+              既定の権限モード: {MODE_LABEL[f.defaultPermissionMode ?? 'ask']} ·{' '}
+              {f.allowFullAuto ? <span style={{ color: 'var(--attention)' }}>「すべて自動」を許可</span> : '「すべて自動」は不可'}
+            </span>
           </Row>
         ))}
         <p className="muted" style={{ padding: '10px 16px', fontSize: 12 }}>
-          追加・削除と AI の指定（agent: "claude" / "codex"）は、設定ファイルの folders を編集して保存します。Hub が自動で読み直します（管理画面は後のフェーズ）。
+          追加・削除と AI の指定（agent: "claude" / "codex"）、「すべて自動」の許可（allowFullAuto: true）、既定の権限モード（defaultPermissionMode）は、設定ファイルの folders を編集して保存します。Hub が自動で読み直します（管理画面は後のフェーズ）。
         </p>
       </Section>
       <Section title="表示">
-        <label className="choice">
-          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-          <span>アーカイブしたセッションも表示する</span>
-        </label>
         <div style={{ padding: '10px 16px' }}>
           <button
             className="btn"

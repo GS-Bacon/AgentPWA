@@ -10,11 +10,33 @@ export function toClaudePermissionMode(mode: PermissionMode): string {
   switch (mode) {
     case 'auto_edit':
       return 'acceptEdits';
+    case 'auto':
+      return 'auto';
+    case 'full_auto':
+      return 'bypassPermissions';
     case 'plan':
       return 'plan';
     case 'ask':
     default:
       return 'default';
+  }
+}
+
+/** `claude` の権限モード（system/init・system/status の permissionMode）をプロトコルの値に戻す。知らない値は undefined。 */
+export function fromClaudePermissionMode(mode: unknown): PermissionMode | undefined {
+  switch (mode) {
+    case 'default':
+      return 'ask';
+    case 'acceptEdits':
+      return 'auto_edit';
+    case 'auto':
+      return 'auto';
+    case 'bypassPermissions':
+      return 'full_auto';
+    case 'plan':
+      return 'plan';
+    default:
+      return undefined;
   }
 }
 

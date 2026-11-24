@@ -1,24 +1,30 @@
 // iPad / Web の左の一覧: プロジェクト（作業フォルダ）ごとにセッションをまとめる。
 // AI はプロジェクトごとに固定なので、プロジェクト名の横のアイコンだけで示す。
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { AgentKind } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { getState, useStore, waitingCount } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, elapsed } from '../lib/format.ts';
 import { openSession, type LayoutState } from '../lib/layout.ts';
-import { buildProjects, type Project } from '../lib/projects.ts';
+import { archivedSessions, buildProjects, type Project } from '../lib/projects.ts';
 import { useNow } from '../components/Requests.tsx';
-import { ConnState, StatusLabel, UsageBars } from '../components/common.tsx';
+import { AutoWarn, ConnState, ContextMenu, sessionMenuItems, StatusLabel, UsageBars, useLongPress } from '../components/common.tsx';
 import { AgentIcon, IconGear, IconPlus } from '../components/Icons.tsx';
 
 export const DRAG_TYPE = 'application/x-agentpwa-session';
 export const isWaiting = (id: string) => (getState().sessions[id]?.rank ?? 9) <= 2;
 
 type Update = (fn: (s: LayoutState) => LayoutState) => void;
+/** 行の右クリック・長押しでメニューを開く */
+type OnMenu = (id: string, x: number, y: number) => void;
 
-function SideRow({ s, paneNo, selected, now, onOpen }: { s: SessionSummary; paneNo?: number; selected: boolean; now: number; onOpen: () => void }) {
-  const sub =
-    s.rank <= 3 ? (
+function SideRow({ s, paneNo, selected, now, onOpen, onMenu }: { s: SessionSummary; paneNo?: number; selected: boolean; now: number; onOpen: () => void; onMenu: OnMenu }) {
+  const longPress = useLongPress((x, y) => onMenu(s.id, x, y));
+  const sub = s.archived ? (
+    <span className="srow-sub ellipsis muted">
+      {s.folderName} · {elapsed(s.updatedAt, now)}
+    </span>
+  ) : s.rank <= 3 ? (
       <span className="srow-sub ellipsis">
         <StatusLabel s={s} withTime now={now} />
       </span>
@@ -38,13 +44,27 @@ function SideRow({ s, paneNo, selected, now, onOpen }: { s: SessionSummary; pane
         e.dataTransfer.effectAllowed = 'copyMove';
       }}
       onClick={onOpen}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu(s.id, e.clientX, e.clientY);
+      }}
+      {...longPress}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => e.key === 'Enter' && onOpen()}
+      aria-haspopup="menu"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') onOpen();
+        // キーボードでもメニューを開ける（Shift+F10 / コンテキストメニューキー）
+        if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+          e.preventDefault();
+          const r = e.currentTarget.getBoundingClientRect();
+          onMenu(s.id, r.left + 24, r.bottom);
+        }
+      }}
       title={s.title}
       style={{ paddingLeft: selected ? 26 : 28 }}
     >
-      {s.rank >= 4 && (
+      {(s.rank >= 4 || s.archived) && (
         <span className="dot" style={{ color: s.rank === 4 ? 'var(--running)' : s.status === 'error' ? 'var(--danger)' : 'var(--fg-faint)' }} aria-hidden="true">
           ●
         </span>
@@ -53,6 +73,7 @@ function SideRow({ s, paneNo, selected, now, onOpen }: { s: SessionSummary; pane
         <span className="srow-title ellipsis" style={s.rank === 5 ? { fontWeight: 500 } : undefined}>{s.title}</span>
         {sub}
       </span>
+      <AutoWarn s={s} />
       {paneNo && (
         <span className="pane-tag" title={`ペイン${paneNo}で表示中`}>
           {paneNo}
@@ -70,6 +91,7 @@ function ProjectGroup({
   layout,
   update,
   now,
+  onMenu,
 }: {
   p: Project;
   collapsed: boolean;
@@ -78,6 +100,7 @@ function ProjectGroup({
   layout: LayoutState;
   update: Update;
   now: number;
+  onMenu: OnMenu;
 }) {
   const paneNo = new Map(layout.panes.map((x, i) => [x.sessionId, i + 1]));
   const focusedSession = layout.panes.find((x) => x.id === layout.focused)?.sessionId;
@@ -115,7 +138,7 @@ function ProjectGroup({
           <div className="muted" style={{ fontSize: 12, padding: '8px 28px', borderBottom: '1px solid #3d444d80' }}>セッションはありません</div>
         ) : (
           p.sessions.map((s) => (
-            <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSession(l, s.id, isWaiting))} />
+            <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSession(l, s.id, isWaiting))} onMenu={onMenu} />
           ))
         ))}
     </div>
@@ -126,13 +149,15 @@ export function Sidebar({
   layout,
   update,
   onNew,
-  showArchived,
+  archivedOpen,
+  setArchivedOpen,
   onSettings,
 }: {
   layout: LayoutState;
   update: Update;
   onNew: (cwd?: string) => void;
-  showArchived: boolean;
+  archivedOpen: boolean;
+  setArchivedOpen: (v: boolean) => void;
   onSettings: () => void;
 }) {
   const sessions = useStore((s) => s.sessions);
@@ -141,12 +166,20 @@ export function Sidebar({
   const [q, setQ] = useState('');
   const now = useNow();
   const query = q.trim().toLowerCase();
-  let projects = buildProjects(info, sessions, showArchived);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const onMenu = useCallback<OnMenu>((id, x, y) => setMenu({ id, x, y }), []);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const menuSession = menu ? sessions[menu.id] : undefined;
+  let projects = buildProjects(info, sessions);
+  let archived = archivedSessions(sessions);
   if (query) {
     projects = projects
       .map((p) => ({ ...p, sessions: p.sessions.filter((s) => s.title.toLowerCase().includes(query)) }))
       .filter((p) => p.sessions.length > 0 || p.name.toLowerCase().includes(query));
+    archived = archived.filter((s) => s.title.toLowerCase().includes(query));
   }
+  const paneNo = new Map(layout.panes.map((x, i) => [x.sessionId, i + 1]));
+  const focusedSession = layout.panes.find((x) => x.id === layout.focused)?.sessionId;
   const usageAgents = (['claude', 'codex'] as AgentKind[]).filter((a) => usage[a].length > 0);
   const collapsed = new Set(layout.collapsed);
   const total = waitingCount(sessions);
@@ -191,9 +224,29 @@ export function Sidebar({
             layout={layout}
             update={update}
             now={now}
+            onMenu={onMenu}
           />
         ))}
+        {archived.length > 0 && (
+          <div>
+            <button
+              className="archive-head"
+              onClick={() => setArchivedOpen(!archivedOpen)}
+              aria-expanded={archivedOpen || Boolean(query)}
+            >
+              <span aria-hidden="true" style={{ width: 12, display: 'inline-block', transform: archivedOpen || query ? 'rotate(90deg)' : 'none', transition: 'transform .1s' }}>
+                ▸
+              </span>
+              アーカイブ済み（{archived.length}）
+            </button>
+            {(archivedOpen || query) &&
+              archived.map((s) => (
+                <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSession(l, s.id, isWaiting))} onMenu={onMenu} />
+              ))}
+          </div>
+        )}
       </div>
+      {menu && menuSession && <ContextMenu x={menu.x} y={menu.y} items={sessionMenuItems(menuSession)} onClose={closeMenu} />}
       <div style={{ borderTop: '1px solid var(--border)', padding: '6px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 'none' }}>
         <ConnState />
         <span />
