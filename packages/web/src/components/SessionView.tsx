@@ -1,12 +1,13 @@
 // セッションの中身（会話・許可要求・入力欄）。iPhone の詳細画面と、iPad / Web のペインで共通に使う。
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AttachmentInfo } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { getState, loadEvents, run, useStore } from '../lib/store.ts';
 import { relPath } from '../lib/format.ts';
 import { unarchiveSession } from '../lib/sessionActions.ts';
-import { buildItems, type Item, type ToolItem } from '../lib/transcript.ts';
+import { buildItems, buildSubagents, type Item, type SubagentInfo, type ToolItem } from '../lib/transcript.ts';
+import { SubagentLine, SubCtx, SubPane, subLabel, subOfRequest, useSubCtx, type SubLayout, type SubPaneState } from './Subagents.tsx';
 import { ApprovalCard, QuestionCard } from './Requests.tsx';
 import { IconChevron, IconFile } from './Icons.tsx';
 import { Composer, useFiles } from './Composer.tsx';
@@ -100,8 +101,21 @@ function AttachmentList({ items }: { items: AttachmentInfo[] }) {
   );
 }
 
+/** サブエージェントが出した許可要求・質問には、出どころを添える */
+function SubOrigin({ requestId }: { requestId: string }) {
+  const sub = subOfRequest(useSubCtx(), requestId);
+  if (!sub) return null;
+  return (
+    <div className="note sub-origin ellipsis">
+      <span className="sub-icon">◆</span> {subLabel(sub)}（{sub.description}）から
+    </div>
+  );
+}
+
 function ItemView({ item, session, focused }: { item: Item; session: SessionSummary; focused: boolean }) {
   switch (item.kind) {
+    case 'subagent':
+      return <SubagentLine toolId={item.toolId} />;
     case 'user':
       return (
         <div className="msg-user">
@@ -119,7 +133,13 @@ function ItemView({ item, session, focused }: { item: Item; session: SessionSumm
       );
     case 'approval': {
       const pending = session.pendingApprovals.find((a) => a.requestId === item.req.requestId);
-      if (pending) return <ApprovalCard session={session} req={pending} focused={focused} />;
+      if (pending)
+        return (
+          <>
+            <SubOrigin requestId={pending.requestId} />
+            <ApprovalCard session={session} req={pending} focused={focused} />
+          </>
+        );
       // 許可したものはツールの行で分かるので出さない。拒否・常に許可・取り下げだけ残す
       if (item.decision === 'allow') return null;
       const label = item.decision === 'deny' ? '✗ 拒否' : item.decision === 'allow_session' ? '✓ 常に許可' : '– 取り下げ';
@@ -132,7 +152,13 @@ function ItemView({ item, session, focused }: { item: Item; session: SessionSumm
     }
     case 'question': {
       const pending = session.pendingQuestions.find((q) => q.requestId === item.req.requestId);
-      if (pending) return <QuestionCard session={session} req={pending} />;
+      if (pending)
+        return (
+          <>
+            <SubOrigin requestId={pending.requestId} />
+            <QuestionCard session={session} req={pending} />
+          </>
+        );
       return <div className="resolved ellipsis">? {item.req.prompt.split('\n')[0]}</div>;
     }
     case 'note':
@@ -142,9 +168,92 @@ function ItemView({ item, session, focused }: { item: Item; session: SessionSumm
   }
 }
 
-export function SessionView({ session, focused = true, compact = false }: { session: SessionSummary; focused?: boolean; compact?: boolean }) {
+/** これより低い領域では、サブペインに分けずに会話へ埋め込む */
+const MIN_SPLIT_HEIGHT = 360;
+
+/**
+ * サブエージェントの一覧と、サブペインの開け閉め。
+ * 新しいサブエージェントが動き出したら開いてそのタブにし、全部終わったら畳んでタブの帯だけ残す。
+ * full（スマホ）では自動では開かない（画面を奪わないため）。
+ */
+function useSubagents(session: SessionSummary, events: Parameters<typeof buildSubagents>[0] | undefined, full: boolean) {
+  const subs = useMemo(() => {
+    const list = buildSubagents(events ?? []);
+    // CLI ごと止まったセッションでは、動いたままの記録も止まったものとして出す
+    const dead = session.status === 'stopped' || session.status === 'error';
+    return dead ? list.map((s): SubagentInfo => (s.state === 'running' ? { ...s, state: 'stopped', progress: undefined } : s)) : list;
+  }, [events, session.status]);
+  const [ui, setUi] = useState<SubPaneState>({ visible: false, active: null, body: false });
+  const known = useRef<{ sessionId: string; ids: Set<string> } | null>(null);
+  const anyRunning = subs.some((s) => s.state === 'running');
+  const wasRunning = useRef(anyRunning);
+
+  useEffect(() => {
+    if (!events) return;
+    if (known.current?.sessionId !== session.id) {
+      // 開いたときは、動いているものがあればそれを出す
+      known.current = { sessionId: session.id, ids: new Set(subs.map((s) => s.toolId)) };
+      const running = subs.filter((s) => s.state === 'running');
+      setUi(running.length > 0 && !full ? { visible: true, active: running[running.length - 1].toolId, body: true } : { visible: false, active: null, body: false });
+      return;
+    }
+    const ids = known.current.ids;
+    const fresh = subs.filter((s) => !ids.has(s.toolId));
+    for (const s of fresh) ids.add(s.toolId);
+    const started = fresh.filter((s) => s.state === 'running');
+    if (started.length > 0 && !full) setUi({ visible: true, active: started[started.length - 1].toolId, body: true });
+  }, [subs, events, session.id, full]);
+
+  useEffect(() => {
+    if (wasRunning.current && !anyRunning && !full) setUi((u) => ({ ...u, body: false }));
+    wasRunning.current = anyRunning;
+  }, [anyRunning, full]);
+
+  return { subs, ui, setUi };
+}
+
+export function SessionView({
+  session,
+  focused = true,
+  compact = false,
+  subLayout = 'split',
+}: {
+  session: SessionSummary;
+  focused?: boolean;
+  compact?: boolean;
+  /** サブエージェントの出し方（スマホは 'full'） */
+  subLayout?: 'split' | 'full';
+}) {
   const events = useStore((s) => s.events[session.id]);
   const items = useMemo(() => buildItems(events ?? []), [events]);
+  const full = subLayout === 'full';
+  const { subs, ui, setUi } = useSubagents(session, events, full);
+  const area = useRef<HTMLDivElement>(null);
+  const [short, setShort] = useState(false);
+  const layout: SubLayout = full ? 'full' : short ? 'inline' : 'split';
+
+  // ペインの高さが足りないときは、サブペインに分けずに会話へ埋め込む
+  useEffect(() => {
+    const el = area.current;
+    if (!el || full) return;
+    const ro = new ResizeObserver(() => setShort(el.clientHeight < MIN_SPLIT_HEIGHT));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [full]);
+
+  const subMap = useMemo(() => new Map(subs.map((s) => [s.toolId, s])), [subs]);
+  const select = useCallback((toolId: string) => setUi(() => ({ visible: true, active: toolId, body: true })), [setUi]);
+  const waiting = useCallback(
+    (sub: SubagentInfo) =>
+      session.pendingApprovals.some((a) => sub.toolIds.has(a.requestId)) || session.pendingQuestions.some((q) => sub.toolIds.has(q.requestId)),
+    [session.pendingApprovals, session.pendingQuestions],
+  );
+  const renderItem = useCallback((it: Item) => <ItemView item={it} session={session} focused={focused} />, [session, focused]);
+  const subCtx = useMemo(
+    () => ({ sessionId: session.id, subs: subMap, layout, select, waiting, renderItem }),
+    [session.id, subMap, layout, select, waiting, renderItem],
+  );
+  const showPane = layout !== 'inline' && ui.visible && subs.length > 0;
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const files = useFiles();
@@ -226,6 +335,9 @@ export function SessionView({ session, focused = true, compact = false }: { sess
           )}
         </div>
       )}
+      <SubCtx.Provider value={subCtx}>
+      {/* 本流の会話と、その下のサブペイン（スマホでは全面に重ねる） */}
+      <div ref={area} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <div
         ref={scroller}
         style={{ flex: '1 1 auto', overflowY: 'auto', minHeight: 0, overscrollBehavior: 'contain' }}
@@ -242,16 +354,25 @@ export function SessionView({ session, focused = true, compact = false }: { sess
           {session.pendingApprovals
             .filter((a) => !shownApprovals.has(a.requestId))
             .map((a) => (
-              <ApprovalCard key={a.requestId} session={session} req={a} focused={focused} />
+              <Fragment key={a.requestId}>
+                <SubOrigin requestId={a.requestId} />
+                <ApprovalCard session={session} req={a} focused={focused} />
+              </Fragment>
             ))}
           {session.pendingQuestions
             .filter((q) => !shownQuestions.has(q.requestId))
             .map((q) => (
-              <QuestionCard key={q.requestId} session={session} req={q} />
+              <Fragment key={q.requestId}>
+                <SubOrigin requestId={q.requestId} />
+                <QuestionCard session={session} req={q} />
+              </Fragment>
             ))}
           {(session.status === 'running' || session.status === 'starting') && <div className="note st-running">● {session.status === 'starting' ? '起動中…' : '作業中…'}</div>}
         </div>
       </div>
+      {showPane && <SubPane subs={subs} ui={ui} setUi={setUi} layout={full ? 'full' : 'split'} area={area} />}
+      </div>
+      </SubCtx.Provider>
       <Composer session={session} compact={compact} files={files} />
     </div>
   );

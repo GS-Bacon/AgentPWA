@@ -393,7 +393,7 @@ function DetailScreen({ id, back }: { id: string; back: () => void }) {
         </div>
         <SessionMenu s={s} />
       </header>
-      <SessionView session={s} focused />
+      <SessionView session={s} focused subLayout="full" />
     </div>
   );
 }

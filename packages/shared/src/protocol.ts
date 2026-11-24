@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -148,7 +148,7 @@ export interface QuestionItem {
 export type DriverEvent =
   | { type: 'status'; status: SessionStatus; reason?: string }
   /** アシスタント発話のストリーミング断片。最後に同じ messageId の `message` を送ること。 */
-  | { type: 'message_delta'; messageId: string; text: string }
+  | { type: 'message_delta'; messageId: string; text: string; parentToolId?: string }
   | {
       type: 'message';
       messageId: string;
@@ -156,6 +156,8 @@ export type DriverEvent =
       text: string;
       /** ユーザーの発言に添えた添付ファイル（v7。中身は入れない） */
       attachments?: AttachmentInfo[];
+      /** v10: サブエージェントの発話なら、それを起動したツールの toolId（`subagent` イベントの toolId） */
+      parentToolId?: string;
     }
   | {
       type: 'tool';
@@ -171,6 +173,31 @@ export type DriverEvent =
       paths?: string[];
       state: 'running' | 'done' | 'failed';
       output?: string;
+      /** v10: サブエージェントが使ったツールなら、そのサブエージェントを起動したツールの toolId */
+      parentToolId?: string;
+    }
+  /**
+   * v10: サブエージェント（エージェントが作業を任せた子のエージェント）の状態。
+   * 起動したとき・進んだとき・終わったときに、同じ toolId で送る（後のものが前のものを上書きする）。
+   * ただし省いた agentType / prompt / result は前の値のままとする（長い prompt は最初の1回だけでよい）。
+   * progress は省けば消える。
+   * サブエージェント内の発話とツールは、`message` / `tool` の `parentToolId` にこの toolId を入れて送る。
+   */
+  | {
+      type: 'subagent';
+      /** サブエージェントを起動したツールの toolId（同じ toolId の `tool` イベントもある） */
+      toolId: string;
+      /** 種類。例: 'Explore', 'general-purpose'（エージェント固有名のままでよい） */
+      agentType?: string;
+      /** 一行の説明。例: '失敗テストの原因調査' */
+      description: string;
+      /** サブエージェントに渡した指示 */
+      prompt?: string;
+      state: 'running' | 'done' | 'failed' | 'stopped';
+      /** 実行中の今の作業（一行） */
+      progress?: string;
+      /** 終わったときの報告 */
+      result?: string;
     }
   | {
       type: 'approval_request';

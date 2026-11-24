@@ -81,6 +81,18 @@ starting ──► running ──► idle ──(send)──► running
 - 削除では、Hub が自分の記録（セッションとイベント）を消したあと、Driver が `deleteHistory` を実装していれば、`resume_token` で受け取った値を渡して呼ぶ。失敗しても Hub 側の削除は取り消さず、Web に失敗を知らせる。
 - `deleteHistory` は、そのセッションの履歴だけを消す。同じフォルダの他のセッションや、エージェントの設定には触れない。
 
+### 3.6 サブエージェント（v10）
+
+エージェントが作業の一部を子のエージェント（サブエージェント）に任せる仕組みがあれば、Web はその中身をペインの下側のサブペインに出す（docs/architecture.md の 5章）。
+
+- サブエージェントを起動したツールの `toolId` を、そのサブエージェントの ID にする。起動したとき・進んだとき・終わったときに、`subagent` イベント（`toolId` / `agentType` / `description` / `prompt` / `state` / `progress` / `result`）を送る。
+  - 同じ `toolId` の後のイベントが前のものを上書きする。ただし省いた `agentType` / `prompt` / `result` は前の値のまま（長い `prompt` は最初の1回だけでよい）。`progress` は省けば消える。`description` は空文字なら前の値のまま。
+  - `state` は `running` → `done` / `failed` / `stopped` の一方向。終わった後に `running` へ戻さない。エージェントのプロセスが終わって行方が分からなくなったものは `stopped` にする。
+  - 起動したツール自身の `tool` イベントも、今までどおり送る（Web はこのツールを本流の「◆」の行に置き換える）。ツールが終わってもサブエージェントは動き続けることがある（裏で動くもの）ので、終わりは `subagent` の `state` で知らせる。
+- サブエージェントの中の発言とツールは、`message` / `message_delta` / `tool` に `parentToolId`（そのサブエージェントの `toolId`）を付けて送る。Web と Hub は、`parentToolId` の付いたイベントを本流の会話に出さない。サブエージェントの中から起動したサブエージェントも、同じ形で入れ子にできる。
+- サブエージェントが出した許可要求・質問は、今までどおり `approval_request` / `question` で送る（`parentToolId` は付けない）。`requestId` がサブエージェントの中の `tool` の `toolId` と同じなら、Web はどのサブエージェントからのものかを示す。
+- Hub はこのイベントを保存・配信するだけで、セッションの状態（`status`）には使わない。本流が `idle` でも、裏でサブエージェントが動いていることがある。
+
 ## 4. 単体での開発とフィクスチャ
 
 Hub ができる前でも、各 Driver を単独で開発・確認できるようにします。
@@ -119,6 +131,7 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | 履歴の削除（`deleteHistory`） | `~/.claude/projects/<cwd の英数字以外を - に置き換えた名前>/<session_id>.jsonl` と、同名のフォルダ（あれば）を消す。`claude --resume` の一覧からも消える |
 | 認証の確認 | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` / `CLAUDE_CODE_USE_FOUNDRY` があれば `api_key`。無ければ `claude auth status`（JSON）の `authMethod` を見て、`claude.ai` / `oauth_token` は `subscription`、`api_key` / `api_key_helper` / `third_party` は `api_key`。起動後も system/init の `apiKeySource` が `none` 以外なら、エラー（fatal）を出して止める |
 | 使用量 | `rate_limit_event` の `unifiedWindows.five_hour` / `seven_day` / `seven_day_overage_included` の utilization を `usage`（「セッション枠（5時間）」「週間」「Fable（週間）」）にする。`seven_day_overage_included` は CLI が「Fable limit」と呼ぶ週間枠で、その枠がある契約のときだけ届く。`windowMinutes` はそれぞれ 300 / 10080 / 10080 |
+| サブエージェント | `Agent`（古い版は `Task`）ツールの `tool_use` で `subagent`（running。`subagent_type` / `description` / `prompt`）を送る。`system/task_started` / `task_progress`（`description` を `progress` に）/ `task_updated`（`patch.status`）/ `task_notification`（`status` と `summary` を `result` に）を、`tool_use_id`（無いものは `task_id` から引く）で対応付けて送る。`task_type` が `local_agent` 以外（裏で動くシェルなど）は扱わない。既定では裏で動くので、`Agent` の `tool_result`（`tool_use_result.isAsync`）では終わりにしない。前面で動いたものは `tool_result` で `done` / `failed` にする。`parent_tool_use_id` の付いた assistant / user メッセージを、`parentToolId` 付きの `message` / `tool` にする（途中経過の stream_event は CLI が送らないので、`message_delta` は出さない）。CLI のプロセスが終わったら、動いたままのものを `stopped` にする |
 
 ### Codex への依頼（権限モード）
 
@@ -164,6 +177,10 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 
 - （任意、v9）`usage` イベントに `windowMinutes`（枠の長さ（分）。5時間枠は 300、週間枠は 10080）を入れてください。app-server のレート制限に枠の長さ（`windowDurationMins` など）があればそのまま使えます。入っていれば、Web のバーに1時間ごと・1日ごとのメモリが付きます。
 
+### Codex への依頼（サブエージェント、v10）
+
+- Codex 側に、作業を子のエージェントに任せる仕組みがあれば、3.6 のとおり `subagent` イベントと `parentToolId` を送り、対応表に書いてください。無ければ対応は不要です（今までどおり本流だけが出ます）。
+
 ### Codex（`codex app-server`）— Codex 担当
 
 | プロトコル | Codex app-server 側 |
@@ -188,3 +205,4 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 | 2026-11-24 | 7 | 添付ファイル（`send` の `attachments`、`message` の `attachments`、`AgentDriver.supportsAttachments`）と、スラッシュコマンドの一覧（`AgentDriver.listCommands`、`SlashCommand`）を追加（3.3。アーカイブと削除は 3.4 に移動）。プロジェクトに既定の権限モードが無いときのモードを `ask` から `auto` に変更（`DEFAULT_PERMISSION_MODE`） | Claude |
 | 2026-11-24 | 8 | `question` に `questions`（問いごとの見出し・選択肢と説明・複数選択。`QuestionItem` / `QuestionOption`）を、`answer` に `answers`（問いごとの回答）を追加（3.4。アーカイブと削除は 3.5 に移動）。どちらも省略可で、古い形（`prompt` / `options` / `text`）も使える。Codex 側の対応は任意 | Claude |
 | 2026-11-24 | 9 | `usage` に `windowMinutes`（枠の長さ（分）。省略可）を追加。UI がバーのメモリ（5時間枠は5等分、週間枠は7等分）に使う。Codex 側の対応は任意 | Claude |
+| 2026-11-24 | 10 | サブエージェントの `subagent` イベントと、`message` / `message_delta` / `tool` の `parentToolId`（サブエージェントの中のイベント）を追加（3.6）。どちらも足しただけで、Codex 側の対応は任意 | Claude |

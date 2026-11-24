@@ -35,6 +35,34 @@ function toolResultText(content: Json): string {
   return '';
 }
 
+type SubagentEv = Extract<DriverEvent, { type: 'subagent' }>;
+
+/** サブエージェントを起動するツール（CLI の版によって名前が違う） */
+export function isSubagentTool(name: string): boolean {
+  return name === 'Task' || name === 'Agent';
+}
+
+function oneLine(s: string, n = 200): string {
+  const t = s.replace(/\s+/g, ' ').trim();
+  return t.length > n ? t.slice(0, n - 1) + '…' : t;
+}
+
+/** task_updated / task_notification の status をプロトコルの状態にする（実行中のものは undefined） */
+function subagentState(status: unknown): SubagentEv['state'] | undefined {
+  switch (status) {
+    case 'completed':
+      return 'done';
+    case 'failed':
+      return 'failed';
+    case 'killed':
+    case 'stopped':
+    case 'cancelled':
+      return 'stopped';
+    default:
+      return undefined;
+  }
+}
+
 function pct(v: unknown): number | undefined {
   return typeof v === 'number' ? Math.round(v * 100) : undefined;
 }
@@ -51,7 +79,11 @@ export class StreamMapper {
   /** 完成版の assistant メッセージを待っている text block の messageId（API メッセージ ID ごとに FIFO） */
   private pendingText = new Map<string, string[]>();
   private textCounter = 0;
-  private tools = new Map<string, { name: string; summary: string; paths?: string[] }>();
+  private tools = new Map<string, { name: string; summary: string; paths?: string[]; parentToolId?: string }>();
+  /** サブエージェント（起動したツールの toolId → 最後に送った状態） */
+  private subagents = new Map<string, SubagentEv>();
+  /** CLI の task_id → サブエージェントを起動したツールの toolId（task_updated には toolId が無いため） */
+  private taskTools = new Map<string, string>();
 
   map(msg: Json): MapResult {
     switch (msg?.type) {
@@ -65,6 +97,7 @@ export class StreamMapper {
             permissionMode: mode,
           };
         }
+        if (typeof msg.subtype === 'string' && msg.subtype.startsWith('task_')) return { events: this.mapTask(msg) };
         return { events: [], permissionMode: mode };
       }
       case 'stream_event':
@@ -115,7 +148,7 @@ export class StreamMapper {
   }
 
   private mapAssistant(msg: Json): MapResult {
-    if (msg.parent_tool_use_id) return { events: [] };
+    if (msg.parent_tool_use_id) return { events: this.mapSubAssistant(msg, String(msg.parent_tool_use_id)) };
     const m = msg.message ?? {};
     const apiId = String(m.id ?? `m${Date.now()}`);
     const events: DriverEvent[] = [];
@@ -133,20 +166,127 @@ export class StreamMapper {
         const toolId = String(block.id);
         this.tools.set(toolId, { name, summary, paths });
         events.push({ type: 'tool', toolId, name, summary, ...(paths ? { paths } : {}), state: 'running' });
+        if (isSubagentTool(name)) {
+          const input = block.input ?? {};
+          const ev = this.updateSubagent(toolId, {
+            agentType: typeof input.subagent_type === 'string' ? input.subagent_type : undefined,
+            description: String(input.description ?? ''),
+            prompt: typeof input.prompt === 'string' ? input.prompt : undefined,
+            state: 'running',
+          });
+          if (ev) events.push(ev);
+        }
       }
     }
     return { events, activity: true };
   }
 
+  /** サブエージェント内の assistant メッセージ（完成版だけ。途中経過の stream_event は CLI が送らない） */
+  private mapSubAssistant(msg: Json, parentToolId: string): DriverEvent[] {
+    const m = msg.message ?? {};
+    const apiId = String(m.id ?? `m${Date.now()}`);
+    const events: DriverEvent[] = [];
+    for (const block of Array.isArray(m.content) ? m.content : []) {
+      if (block?.type === 'text') {
+        const text = String(block.text ?? '');
+        if (text.trim()) events.push({ type: 'message', messageId: `${apiId}:s${this.textCounter++}`, role: 'assistant', text, parentToolId });
+      } else if (block?.type === 'tool_use') {
+        const name = String(block.name ?? 'tool');
+        const summary = summarizeTool(name, block.input ?? {});
+        const paths = toolPaths(name, block.input ?? {});
+        const toolId = String(block.id);
+        this.tools.set(toolId, { name, summary, paths, parentToolId });
+        events.push({ type: 'tool', toolId, name, summary, ...(paths ? { paths } : {}), state: 'running', parentToolId });
+      }
+    }
+    return events;
+  }
+
+  /** system/task_*（サブエージェントの起動・進み具合・終了）を subagent イベントにする */
+  private mapTask(msg: Json): DriverEvent[] {
+    const taskId = typeof msg.task_id === 'string' ? msg.task_id : undefined;
+    let toolId = typeof msg.tool_use_id === 'string' ? msg.tool_use_id : undefined;
+    if (toolId && taskId) this.taskTools.set(taskId, toolId);
+    if (!toolId && taskId) toolId = this.taskTools.get(taskId);
+    if (!toolId) return [];
+    // サブエージェント以外のバックグラウンド作業（シェルなど）は扱わない
+    if (msg.task_type && msg.task_type !== 'local_agent' && !this.subagents.has(toolId)) return [];
+    switch (msg.subtype) {
+      case 'task_started': {
+        const ev = this.updateSubagent(toolId, {
+          agentType: typeof msg.subagent_type === 'string' ? msg.subagent_type : undefined,
+          description: String(msg.description ?? ''),
+          prompt: typeof msg.prompt === 'string' ? msg.prompt : undefined,
+          state: 'running',
+        });
+        return ev ? [ev] : [];
+      }
+      case 'task_progress': {
+        if (!this.subagents.has(toolId)) return [];
+        const ev = this.updateSubagent(toolId, { progress: oneLine(String(msg.description ?? '')) || undefined });
+        return ev ? [ev] : [];
+      }
+      case 'task_updated':
+      case 'task_notification': {
+        const state = subagentState(msg.subtype === 'task_updated' ? msg.patch?.status : msg.status);
+        if (!state || !this.subagents.has(toolId)) return [];
+        const result = typeof msg.summary === 'string' && msg.summary.trim() ? truncate(msg.summary) : undefined;
+        const ev = this.updateSubagent(toolId, { state, progress: undefined, result });
+        return ev ? [ev] : [];
+      }
+      default:
+        return [];
+    }
+  }
+
+  /**
+   * サブエージェントの状態を更新し、変わっていれば送るイベントを返す。
+   * patch の undefined は「変えない」（progress だけは「消す」）。終わった後に running へは戻さない。
+   */
+  private updateSubagent(toolId: string, patch: Partial<Omit<SubagentEv, 'type' | 'toolId'>>): SubagentEv | undefined {
+    const prev = this.subagents.get(toolId);
+    if (prev && prev.state !== 'running' && patch.state === 'running') return undefined;
+    const next: SubagentEv = { type: 'subagent', toolId, description: '', state: 'running', ...prev };
+    if (patch.agentType) next.agentType = patch.agentType;
+    if (patch.description) next.description = patch.description;
+    if (patch.prompt) next.prompt = patch.prompt;
+    if (patch.state) next.state = patch.state;
+    if (patch.result) next.result = patch.result;
+    if ('progress' in patch) {
+      if (patch.progress) next.progress = patch.progress;
+      else delete next.progress;
+    }
+    if (prev && JSON.stringify(prev) === JSON.stringify(next)) return undefined;
+    this.subagents.set(toolId, next);
+    // 指示（prompt）は長いので、変わったときだけ送る（省いたものは前の値のまま）
+    if (prev?.prompt && prev.prompt === next.prompt) {
+      const { prompt: _p, ...rest } = next;
+      return rest;
+    }
+    return next;
+  }
+
+  /** まだ動いているサブエージェントを止まったことにする（CLI のプロセスが終わったとき） */
+  stopSubagents(): DriverEvent[] {
+    const out: DriverEvent[] = [];
+    for (const [toolId, s] of this.subagents) {
+      if (s.state !== 'running') continue;
+      const ev = this.updateSubagent(toolId, { state: 'stopped', progress: undefined });
+      if (ev) out.push(ev);
+    }
+    return out;
+  }
+
   private mapUser(msg: Json): MapResult {
-    if (msg.parent_tool_use_id) return { events: [] };
+    const sub = msg.parent_tool_use_id ? String(msg.parent_tool_use_id) : undefined;
     const content = msg.message?.content;
     if (!Array.isArray(content)) return { events: [] };
     const events: DriverEvent[] = [];
     for (const block of content) {
       if (block?.type !== 'tool_result') continue;
       const toolId = String(block.tool_use_id);
-      const t = this.tools.get(toolId) ?? { name: 'tool', summary: '' };
+      const t = this.tools.get(toolId) ?? { name: 'tool', summary: '', parentToolId: sub };
+      const output = truncate(toolResultText(block.content));
       events.push({
         type: 'tool',
         toolId,
@@ -154,10 +294,19 @@ export class StreamMapper {
         summary: t.summary,
         ...(t.paths ? { paths: t.paths } : {}),
         state: block.is_error ? 'failed' : 'done',
-        output: truncate(toolResultText(block.content)),
+        output,
+        ...(t.parentToolId ? { parentToolId: t.parentToolId } : {}),
       });
+      // 前面で動いたサブエージェントは、ツールの結果が届いた時点で終わっている（裏で動くものは task_notification で終わる）
+      const r = msg.tool_use_result;
+      const async = r?.isAsync === true || r?.status === 'async_launched';
+      if (!sub && isSubagentTool(t.name) && !async && this.subagents.get(toolId)?.state === 'running') {
+        const ev = this.updateSubagent(toolId, { state: block.is_error ? 'failed' : 'done', progress: undefined, result: output || undefined });
+        if (ev) events.push(ev);
+      }
     }
-    return { events, activity: events.length > 0 };
+    // サブエージェント内の動きでは、セッションの状態（running）を変えない
+    return { events, activity: !sub && events.length > 0 };
   }
 
   private mapRateLimit(info: Json): DriverEvent[] {

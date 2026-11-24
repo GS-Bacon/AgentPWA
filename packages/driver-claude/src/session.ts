@@ -521,6 +521,8 @@ export class ClaudeSession implements DriverSession {
     if (this.proc !== proc) return;
     this.proc = null;
     this.failOutgoing('claude CLI が終了しました');
+    // CLI と一緒に終わったサブエージェントを、止まったことにする
+    for (const e of this.mapper.stopSubagents()) this.emit(e);
     if (this.stopping) return;
     this.denyAllPending('claude CLI が終了しました');
     if (this.killedOnPurpose) return;

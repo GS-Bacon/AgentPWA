@@ -22,10 +22,78 @@ export type Item =
   | { kind: 'tools'; key: string; tools: ToolItem[] }
   | { kind: 'approval'; key: string; req: ApprovalEv; at: string; decision?: ApprovalDecision }
   | { kind: 'question'; key: string; req: QuestionEv; at: string; resolved: boolean }
+  /** サブエージェントを起動した行（中身はサブペインに出す。状態は SubagentInfo を見る） */
+  | { kind: 'subagent'; key: string; toolId: string }
   | { kind: 'note'; key: string; text: string }
   | { kind: 'error'; key: string; text: string };
 
-export function buildItems(events: SessionEvent[]): Item[] {
+type SubagentEv = Extract<DriverEvent, { type: 'subagent' }>;
+
+export interface SubagentInfo {
+  toolId: string;
+  agentType?: string;
+  description: string;
+  prompt?: string;
+  state: SubagentEv['state'];
+  progress?: string;
+  result?: string;
+  /** サブエージェントの中の会話とツール */
+  items: Item[];
+  /** サブエージェントが使ったツールの toolId（許可要求がどのサブエージェントのものか調べるのに使う） */
+  toolIds: Set<string>;
+}
+
+/** イベントが属するサブエージェント（起動したツールの toolId）。本流のものは undefined */
+function parentOf(ev: SessionEvent): string | undefined {
+  return ev.type === 'message' || ev.type === 'message_delta' || ev.type === 'tool' ? ev.parentToolId : undefined;
+}
+
+/** サブエージェントごとに、状態と中身をまとめる（起動した順） */
+export function buildSubagents(events: SessionEvent[]): SubagentInfo[] {
+  const subs = new Map<string, SubagentInfo>();
+  const childEvents = new Map<string, SessionEvent[]>();
+  for (const ev of events) {
+    if (ev.type === 'subagent') {
+      const prev = subs.get(ev.toolId);
+      subs.set(ev.toolId, {
+        toolId: ev.toolId,
+        agentType: ev.agentType ?? prev?.agentType,
+        description: ev.description || prev?.description || '',
+        prompt: ev.prompt ?? prev?.prompt,
+        state: ev.state,
+        progress: ev.progress,
+        result: ev.result ?? prev?.result,
+        items: [],
+        toolIds: prev?.toolIds ?? new Set(),
+      });
+      continue;
+    }
+    const parent = parentOf(ev);
+    if (!parent) continue;
+    const list = childEvents.get(parent) ?? [];
+    list.push(ev);
+    childEvents.set(parent, list);
+  }
+  const ids = new Set(subs.keys());
+  for (const [toolId, list] of childEvents) {
+    const s = subs.get(toolId);
+    if (!s) continue;
+    s.items = buildItems(list, { inner: true, subagentIds: ids });
+    for (const ev of list) if (ev.type === 'tool') s.toolIds.add(ev.toolId);
+  }
+  return [...subs.values()];
+}
+
+/**
+ * 本流の会話の項目を組み立てる。サブエージェントの中のイベント（parentToolId 付き）は除き、
+ * サブエージェントを起動したツールは 'subagent' の行にする。
+ * inner のときは、サブエージェントの中身として組み立てる（parentToolId で除かない。
+ * サブエージェントの中から起動したサブエージェントは、subagentIds で渡す）。
+ */
+export function buildItems(events: SessionEvent[], opts: { inner?: boolean; subagentIds?: Set<string> } = {}): Item[] {
+  const inner = opts.inner ?? false;
+  const subagentIds = opts.subagentIds ?? new Set<string>();
+  if (!opts.subagentIds) for (const ev of events) if (ev.type === 'subagent') subagentIds.add(ev.toolId);
   const items: Item[] = [];
   const msgIndex = new Map<string, number>();
   const toolIndex = new Map<string, { item: number; tool: number }>();
@@ -35,7 +103,10 @@ export function buildItems(events: SessionEvent[]): Item[] {
   /** 直前のモデルとエフォート（'model|effort'） */
   let model: string | undefined;
 
+  const subagentShown = new Set<string>();
+
   for (const ev of events) {
+    if (!inner && parentOf(ev)) continue;
     switch (ev.type) {
       case 'message': {
         if (ev.role === 'user') {
@@ -62,6 +133,13 @@ export function buildItems(events: SessionEvent[]): Item[] {
         break;
       }
       case 'tool': {
+        if (subagentIds.has(ev.toolId)) {
+          if (!subagentShown.has(ev.toolId)) {
+            subagentShown.add(ev.toolId);
+            items.push({ kind: 'subagent', key: `s${ev.seq}`, toolId: ev.toolId });
+          }
+          break;
+        }
         const tool: ToolItem = { toolId: ev.toolId, name: ev.name, summary: ev.summary, paths: ev.paths, state: ev.state, output: ev.output };
         const pos = toolIndex.get(ev.toolId);
         if (pos) {
