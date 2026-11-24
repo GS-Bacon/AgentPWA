@@ -5,7 +5,7 @@ import type { AgentKind } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { getState, useStore, waitingCount } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, elapsed } from '../lib/format.ts';
-import { openSession, type LayoutState } from '../lib/layout.ts';
+import { openSessionInNewPane, type LayoutState } from '../lib/layout.ts';
 import { archivedSessions, buildProjects, type Project } from '../lib/projects.ts';
 import { useNow } from '../components/Requests.tsx';
 import { AutoWarn, ConnState, ContextMenu, sessionMenuItems, StatusLabel, UsageBars, useLongPress } from '../components/common.tsx';
@@ -138,7 +138,7 @@ function ProjectGroup({
           <div className="muted" style={{ fontSize: 12, padding: '8px 28px', borderBottom: '1px solid #3d444d80' }}>セッションはありません</div>
         ) : (
           p.sessions.map((s) => (
-            <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSession(l, s.id, isWaiting))} onMenu={onMenu} />
+            <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSessionInNewPane(l, s.id))} onMenu={onMenu} />
           ))
         ))}
     </div>
@@ -241,7 +241,7 @@ export function Sidebar({
             </button>
             {(archivedOpen || query) &&
               archived.map((s) => (
-                <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSession(l, s.id, isWaiting))} onMenu={onMenu} />
+                <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSessionInNewPane(l, s.id))} onMenu={onMenu} />
               ))}
           </div>
         )}

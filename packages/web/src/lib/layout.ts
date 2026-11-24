@@ -135,6 +135,20 @@ export function openSession(s: LayoutState, sessionId: string, isWaiting: (sessi
   return setPaneSession(s, target.id, sessionId);
 }
 
+/**
+ * 一覧からセッションを開く: 既にどこかのペインにあればそこへ移る。
+ * なければ新しいペインで開く（フォーカス中のペインの右に足す）。フォーカス中のペインが空なら、そこに表示する。
+ */
+export function openSessionInNewPane(s: LayoutState, sessionId: string): LayoutState {
+  const existing = s.panes.find((p) => p.sessionId === sessionId);
+  if (existing) return { ...s, focused: existing.id };
+  const target = s.panes.find((p) => p.id === s.focused);
+  if (target && isEmptyPane(target)) return setPaneSession(s, target.id, sessionId);
+  const p: Pane = { id: newId(), sessionId };
+  const custom = target ? insertAt(s.custom, p.id, target.id, 'right') : s.custom;
+  return { ...s, panes: [...s.panes, p], custom, focused: p.id };
+}
+
 /** 境界をドラッグしたときの重み調整（i と i+1 の間） */
 export function resizeWeights<T extends { weight: number }>(items: T[], i: number, deltaFrac: number): T[] {
   const a = items[i];

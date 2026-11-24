@@ -48,6 +48,18 @@ const ZONE_STYLE: Record<DropZone, React.CSSProperties> = {
   bottom: { left: 0, right: 0, bottom: 0, height: '50%' },
   center: { inset: 0 },
 };
+const ZONE_LABEL: Record<Exclude<DropZone, 'center'>, string> = { left: '左に分割', right: '右に分割', top: '上に分割', bottom: '下に分割' };
+
+// ドラッグ中は、ビュワーの iframe などがドラッグを横取りしないように、body に印を付ける（styles.css の body.dragging）
+if (typeof document !== 'undefined') {
+  const on = () => document.body.classList.add('dragging');
+  const off = () => document.body.classList.remove('dragging');
+  document.addEventListener('dragstart', on);
+  document.addEventListener('dragend', off);
+  document.addEventListener('drop', off);
+  // 掴んだ要素が移動して dragend が届かなかったときの保険（ドラッグ中は mousemove が来ない）
+  document.addEventListener('mousemove', off);
+}
 
 // ---- ペイン ----
 
@@ -75,6 +87,18 @@ function PaneView({
   const sessions = useStore((st) => st.sessions);
   const now = useNow();
   const [zone, setZone] = useState<DropZone | null>(null);
+  const [dragKind, setDragKind] = useState<'pane' | 'session'>('pane');
+  // ドラッグを取りやめたときや、ほかの場所に落としたときに、重ね表示を消す
+  useEffect(() => {
+    if (!zone) return;
+    const clear = () => setZone(null);
+    document.addEventListener('dragend', clear);
+    document.addEventListener('drop', clear);
+    return () => {
+      document.removeEventListener('dragend', clear);
+      document.removeEventListener('drop', clear);
+    };
+  }, [zone]);
   const focused = layout.focused === pane.id;
   const waiting = s && s.rank <= 2;
 
@@ -107,6 +131,8 @@ function PaneView({
       e.dataTransfer.dropEffect = isPane ? 'move' : 'copy';
       const z = zoneAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY);
       if (z !== zone) setZone(z);
+      const kind = isPane ? 'pane' : 'session';
+      if (kind !== dragKind) setDragKind(kind);
     },
     onDragLeave: (e: React.DragEvent) => {
       if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setZone(null);
@@ -123,11 +149,11 @@ function PaneView({
       else update((l) => dropSession(l, sessionId, pane.id, z));
     },
   };
+  // ドロップすると何が起きるかを、範囲と文字で示す（VS Code と同じく、分割なら新しいペインが入る半分を塗る）
   const dropOverlay = zone && (
-    <div
-      aria-hidden
-      style={{ position: 'absolute', ...ZONE_STYLE[zone], background: 'rgba(56, 139, 253, 0.15)', border: '1px solid var(--link)', pointerEvents: 'none', zIndex: 3 }}
-    />
+    <div aria-hidden className="drop-overlay" style={{ ...ZONE_STYLE[zone] }}>
+      <span className="drop-label">{zone === 'center' ? (dragKind === 'pane' ? '入れ替え' : 'このペインに表示') : ZONE_LABEL[zone]}</span>
+    </div>
   );
 
   const quick = sortedSessions(sessions).filter((x) => !layout.panes.some((p) => p.sessionId === x.id)).slice(0, 6);
