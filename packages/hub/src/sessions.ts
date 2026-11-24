@@ -5,7 +5,15 @@ import { DEFAULT_PERMISSION_MODE, EFFORT_LEVELS, PERMISSION_MODES, type AgentDri
 import type { CreateSessionRequest, DeleteSessionResult, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { findAllowedFolder, isModeAllowed, type HubConfig } from './config.ts';
 import type { Store } from './db.ts';
-import { applyEvent, isEmptySession, markRead, markUnread, newRecord, normalizeRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
+import { applyEvent, effectiveEvents, isEmptySession, markRead, markUnread, newRecord, normalizeRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
+
+/** フォークで新しいセッションに写すイベント（会話の表示に要るもの） */
+const FORK_COPY = new Set<DriverEvent['type']>(['message', 'tool', 'approval_request', 'approval_resolved', 'question', 'question_resolved']);
+
+/** ターンの途中（作業中・許可待ち・質問待ち・起動中） */
+function isTurnActive(rec: { status: string }): boolean {
+  return rec.status === 'starting' || rec.status === 'running' || rec.status === 'waiting_approval' || rec.status === 'waiting_input';
+}
 
 export class HttpError extends Error {
   constructor(
@@ -124,9 +132,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   /** Driver が対応している機能（Web が添付ボタンやコマンドの補完を出すかに使う） */
-  features(agent: AgentKind): { attachments: boolean; commands: boolean } {
+  features(agent: AgentKind): { attachments: boolean; commands: boolean; rewind: boolean; fork: boolean } {
     const d = this.drivers.get(agent);
-    return { attachments: d?.supportsAttachments === true, commands: typeof d?.listCommands === 'function' };
+    return {
+      attachments: d?.supportsAttachments === true,
+      commands: typeof d?.listCommands === 'function',
+      rewind: d?.supportsRewind === true,
+      fork: typeof d?.forkToken === 'function',
+    };
   }
 
   async checkAuth(agent: AgentKind, force = false): Promise<AuthCheck> {
@@ -245,11 +258,16 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (action.type === 'send' && action.attachments?.length && !this.drivers.get(rec.agent)?.supportsAttachments) {
       throw new HttpError(400, `${rec.agent} のセッションでは、まだファイルを添付できません`);
     }
+    if (action.type === 'rewind') {
+      if (!this.drivers.get(rec.agent)?.supportsRewind) throw new HttpError(400, `${rec.agent} のセッションでは巻き戻せません`);
+      if (isTurnActive(rec)) throw new HttpError(409, '作業中は巻き戻せません。中断してから巻き戻してください');
+      if (!this.isRewindable(id, action.messageId)) throw new HttpError(400, 'この発言には巻き戻せません');
+    }
     let s = this.live.get(id);
     if (!s) {
       if (action.type === 'interrupt') return;
-      if (action.type !== 'send') throw new HttpError(409, 'セッションが動いていません。再開してから操作してください');
-      if (rec.archived) throw new HttpError(409, 'アーカイブ済みのセッションです。アーカイブを解除してから送信してください');
+      if (action.type !== 'send' && action.type !== 'rewind') throw new HttpError(409, 'セッションが動いていません。再開してから操作してください');
+      if (rec.archived) throw new HttpError(409, 'アーカイブ済みのセッションです。アーカイブを解除してから操作してください');
       s = await this.ensureLive(id);
     }
     try {
@@ -325,6 +343,70 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     } catch (e) {
       throw new HttpError(409, (e as Error).message);
     }
+  }
+
+  /** 巻き戻し・フォークの対象にできる発言か（Driver が rewindable を付けた、巻き戻されていないユーザーの発言） */
+  private isRewindable(id: string, messageId: string): boolean {
+    return effectiveEvents(this.store.eventsAfter(id, 0, Number.MAX_SAFE_INTEGER)).some(
+      (e) => e.type === 'message' && e.role === 'user' && e.messageId === messageId && e.rewindable === true,
+    );
+  }
+
+  /**
+   * フォーク（v11）: 発言 messageId のターンの終わりまでの会話を引き継ぐ、新しいセッションを作る。
+   * 会話の記録（表示用のイベント）を写し、Driver が返した resumeToken を持たせる。起動は最初の送信まで待つ。
+   * 元のセッションは変えない。ターンの途中（まだ終わっていない最後のターン）からはフォークできない。
+   */
+  async fork(id: string, messageId: string): Promise<SessionSummary> {
+    const src = this.mustGet(id);
+    const driver = this.drivers.get(src.agent);
+    if (!driver?.forkToken) throw new HttpError(400, `${src.agent} のセッションはフォークできません`);
+    if (!src.resumeToken) throw new HttpError(409, 'フォークできる会話がありません');
+    const events = effectiveEvents(this.store.eventsAfter(id, 0, Number.MAX_SAFE_INTEGER));
+    const at = events.findIndex((e) => e.type === 'message' && e.role === 'user' && e.messageId === messageId);
+    const target = events[at];
+    if (!target || target.type !== 'message' || !target.rewindable) throw new HttpError(400, 'この発言からはフォークできません');
+    const next = events.findIndex((e, i) => i > at && e.type === 'message' && e.role === 'user');
+    if (next < 0 && isTurnActive(src)) throw new HttpError(409, 'このターンはまだ終わっていません。終わってからフォークしてください');
+    let token: string;
+    try {
+      token = await driver.forkToken({ cwd: src.cwd, resumeToken: src.resumeToken, messageId });
+    } catch (e) {
+      throw new HttpError(409, `フォークできませんでした: ${(e as Error).message}`);
+    }
+    const now = this.now();
+    const rec = newRecord({
+      id: randomUUID(),
+      agent: src.agent,
+      title: `${src.title}（フォーク）`.slice(0, 100),
+      cwd: src.cwd,
+      folderName: src.folderName,
+      model: src.model,
+      effort: src.effort,
+      permissionMode: src.permissionMode,
+      now,
+      started: true,
+    });
+    this.records.set(rec.id, rec);
+    this.store.saveSession(rec);
+    // 会話の表示に要るものだけ写す（状態や断片は写さない）
+    for (const e of events.slice(0, next < 0 ? events.length : next)) {
+      if (!FORK_COPY.has(e.type)) continue;
+      // 時刻は元のまま（送った時刻の表示に使う）
+      const { sessionId: _s, seq: _q, at, ...ev } = e;
+      this.record(rec.id, ev as DriverEvent, at);
+    }
+    this.record(rec.id, { type: 'resume_token', token });
+    this.record(rec.id, { type: 'permission_mode', mode: src.permissionMode });
+    const model: DriverEvent = { type: 'model' };
+    if (src.model) model.model = src.model;
+    if (src.effort) model.effort = src.effort;
+    if (src.resolvedModel) model.resolvedModel = src.resolvedModel;
+    if (src.resolvedEffort) model.resolvedEffort = src.resolvedEffort;
+    this.record(rec.id, model);
+    // 動いていない（次の送信で起動する）。idle にすると、写した許可要求なども残らない
+    this.record(rec.id, { type: 'status', status: 'idle', reason: `「${src.title}」からフォークしました` });
+    return this.get(rec.id);
   }
 
   read(id: string, seq?: number): SessionSummary {
@@ -493,11 +575,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.record(id, ev);
   }
 
-  /** イベントに seq と時刻を付けて保存・適用・配信する。 */
-  private record(id: string, ev: DriverEvent): void {
+  /** イベントに seq と時刻（省略時は今）を付けて保存・適用・配信する。 */
+  private record(id: string, ev: DriverEvent, at?: string): void {
     const rec = this.records.get(id);
     if (!rec) return;
-    const full = { ...ev, sessionId: id, seq: rec.lastSeq + 1, at: this.now() } as SessionEvent;
+    const full = { ...ev, sessionId: id, seq: rec.lastSeq + 1, at: at ?? this.now() } as SessionEvent;
     const next = applyEvent(rec, full);
     this.records.set(id, next);
     this.store.insertEvent(full);

@@ -44,6 +44,14 @@ export const IconCopy = (p: { size?: number }) => (
   <Svg {...p}><rect x="9" y="9" width="12" height="12" rx="1" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></Svg>
 );
 export const IconCheck = (p: { size?: number }) => <Svg {...p}><path d="M5 12l5 5 9-10" /></Svg>;
+/** フォーク（枝分かれ） */
+export const IconFork = (p: { size?: number }) => (
+  <Svg {...p}><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7M12 12v5" /></Svg>
+);
+/** 巻き戻し（左回りの矢印） */
+export const IconRewind = (p: { size?: number }) => <Svg {...p}><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5" /></Svg>;
+/** 編集（鉛筆） */
+export const IconPencil = (p: { size?: number }) => <Svg {...p}><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z" /></Svg>;
 export const IconSidebar = (p: { size?: number }) => <Svg {...p}><rect x="3" y="4" width="18" height="16" /><path d="M9 4v16" /></Svg>;
 /** ピン止め（画鋲） */
 export const IconPin = (p: { size?: number }) => <Svg {...p}><path d="M9 4h6M10 4v6l-3 4h10l-3-4V4M12 14v7" /></Svg>;

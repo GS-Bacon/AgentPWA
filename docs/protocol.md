@@ -93,6 +93,19 @@ starting ──► running ──► idle ──(send)──► running
 - サブエージェントが出した許可要求・質問は、今までどおり `approval_request` / `question` で送る（`parentToolId` は付けない）。`requestId` がサブエージェントの中の `tool` の `toolId` と同じなら、Web はどのサブエージェントからのものかを示す。
 - Hub はこのイベントを保存・配信するだけで、セッションの状態（`status`）には使わない。本流が `idle` でも、裏でサブエージェントが動いていることがある。
 
+### 3.7 巻き戻しとフォーク（v11）
+
+Web では、送ったメッセージの下に「フォーク・巻き戻し・編集・コピー」を出す（Claude のデスクトップアプリと同じ並び）。
+
+- 対象にできるのは、Driver が `message`（`role: 'user'`）に `rewindable: true` を付けた発言だけ。Driver は、その `messageId` からエージェント側の発言を特定できるときだけ付ける。
+- **巻き戻し**: `UserAction` の `rewind`（`messageId`、`restore`: `conversation` / `code` / `both`）。発言の直前の状態に戻す。`code` はファイルの内容を、その発言を送る前の状態に戻す。
+  - Hub はターンの途中（`starting` / `running` / `waiting_*`）では受け付けない。止まっているセッションでは Driver を起動してから渡す。
+  - 会話を戻したら、Driver は（必要なら新しい `resume_token` を送ってから）`rewound` を送る。Hub と Web は、その発言から `rewound` までの記録を会話の表示とフォークの写しから外す（記録そのものは消さない）。
+  - 失敗したら例外にする（何も変えない）。ファイルと会話の両方を戻すときは、ファイルを戻せなければ会話も戻さない。
+  - 編集は Web が「`rewind`（`conversation`）→ 直した文の `send`」で行う。巻き戻しで会話を戻したときは、Web が戻した発言を入力欄に入れる。
+- **フォーク**: Hub の `POST /api/sessions/:id/fork`（`{ messageId }`）。Hub は `AgentDriver.forkToken` で新しいセッションの `resumeToken` をもらい、その発言のターンの終わり（次のユーザーの発言の直前）までの表示用のイベント（`message` / `tool` / 許可・質問とその解決）を写した新しいセッションを作る。起動は最初の送信まで待つ。元のセッションは変えない。まだ終わっていない最後のターンからはフォークできない。
+- `supportsRewind` / `forkToken` が無い Driver では、Web は巻き戻し・編集・フォークを出さない（コピーだけ）。
+
 ## 4. 単体での開発とフィクスチャ
 
 Hub ができる前でも、各 Driver を単独で開発・確認できるようにします。
@@ -128,6 +141,10 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | 既定の解決（`resolvedModel` / `resolvedEffort`） | 制御要求 `{"subtype":"get_settings"}` の応答の `applied.model` / `applied.effort` を使う（設定ファイルの `modelSettings` なども反映済みの値。Opus 5 は既定が `high` など、モデルごとに違う）。プロセスが動いていればそこへ送り、動いていなければ同じ `--model` / `--effort` で短く起動して聞き、すぐ終了する（API は呼ばないので使用量は減らない）。起動直後と `set_model` のたびに調べ、分かったら `model` を送り直す |
 | ツールの対象ファイル（`paths`） | `Read` / `Write` / `Edit` / `MultiEdit` の `file_path`、`NotebookEdit` の `notebook_path`（CLI が渡す絶対パスのまま） |
 | モードの通知 | stream-json の `system/init` と `system/status` の `permissionMode` を、上の対応の逆で `permission_mode` にして送る（計画モードの終了など、CLI 自身による変更もここで届く） |
+| 巻き戻し・フォークの対象（`rewindable`） | 送るときに `{"type":"user","uuid":<新しい UUID>,…}` と uuid を付ける。CLI は会話の記録（`~/.claude/projects/<…>/<session_id>.jsonl`）でもこの uuid を使うので、`messageId` にこの uuid を入れて `rewindable: true` にする。起動役が記録を読めない（`readText` が無い）ときは付けない |
+| 巻き戻し（会話） | 記録の jsonl から発言の `parentUuid` を求め、次の起動を `--resume <id> --resume-session-at <parentUuid> --fork-session`（どちらもヘルプに出ないが 2.1.327 にある）にする。新しい session_id は起動しないと分からないので、`resume_token` に `<id>|at=<uuid>|fork` の形で「途中から始める予定」を入れて送り、起動後の system/init で新しい session_id を送り直す。発言が会話の最初なら `fresh`（何も引き継がずに始める）。プロセスは終わらせてから行う |
+| 巻き戻し（コード） | 環境変数 `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true` で起動して、CLI にファイルの変更前の控えを取らせておく（ヘッドレスでは既定で取らない）。巻き戻すときは `claude -p --resume <id> --rewind-files <発言の uuid>` を実行する。戻るのは Write / Edit などのファイル編集ツールで変えた分だけ（Bash で変えたファイルは戻らない）。この設定より前のセッションには控えが無いので失敗する |
+| フォーク（`forkToken`） | 記録の jsonl で、発言の後の最初のユーザーの発言の `parentUuid` を求め、`<id>|at=<それ>|fork` を返す（最後のターンなら `<id>|fork`）。フォークした記録にはファイルの控えも写るので、フォーク先でもコードを巻き戻せる |
 | 履歴の削除（`deleteHistory`） | `~/.claude/projects/<cwd の英数字以外を - に置き換えた名前>/<session_id>.jsonl` と、同名のフォルダ（あれば）を消す。`claude --resume` の一覧からも消える |
 | 認証の確認 | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` / `CLAUDE_CODE_USE_FOUNDRY` があれば `api_key`。無ければ `claude auth status`（JSON）の `authMethod` を見て、`claude.ai` / `oauth_token` は `subscription`、`api_key` / `api_key_helper` / `third_party` は `api_key`。起動後も system/init の `apiKeySource` が `none` 以外なら、エラー（fatal）を出して止める |
 | 使用量 | `rate_limit_event` の `unifiedWindows.five_hour` / `seven_day` / `seven_day_overage_included` の utilization を `usage`（「セッション枠（5時間）」「週間」「Fable（週間）」）にする。`seven_day_overage_included` は CLI が「Fable limit」と呼ぶ週間枠で、その枠がある契約のときだけ届く。`windowMinutes` はそれぞれ 300 / 10080 / 10080 |
@@ -169,6 +186,10 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 
 - Codex 側に、1回に複数の問いや選択肢つきの問いを出す仕組みがあれば、`question` の `questions` に入れ、`answer` の `answers`（問いごとの回答）で返してください（3.4 を参照）。無ければ対応は不要です（`prompt` / `options` と `text` は今までどおり使えます）。
 
+### Codex への依頼（巻き戻しとフォーク、v11）
+
+- 任意です。app-server にスレッドを途中まで巻き戻す・分岐させる仕組み（例: ターン単位のロールバックやフォーク）があれば、`rewindable` / `rewind` / `rewound` / `supportsRewind` / `forkToken` を実装して対応表に書いてください（3.7 を参照）。無ければ対応は不要です（Web はコピーだけ出します）。
+
 ### Codex への依頼（セッションの削除）
 
 - `deleteHistory` を実装するか決めて、対応表に書いてください。app-server にスレッドを消す（またはアーカイブする）メソッドがあれば使い、なければ実装しなくてよい（Hub の記録だけ消える）。
@@ -206,3 +227,4 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 | 2026-11-24 | 8 | `question` に `questions`（問いごとの見出し・選択肢と説明・複数選択。`QuestionItem` / `QuestionOption`）を、`answer` に `answers`（問いごとの回答）を追加（3.4。アーカイブと削除は 3.5 に移動）。どちらも省略可で、古い形（`prompt` / `options` / `text`）も使える。Codex 側の対応は任意 | Claude |
 | 2026-11-24 | 9 | `usage` に `windowMinutes`（枠の長さ（分）。省略可）を追加。UI がバーのメモリ（5時間枠は5等分、週間枠は7等分）に使う。Codex 側の対応は任意 | Claude |
 | 2026-11-24 | 10 | サブエージェントの `subagent` イベントと、`message` / `message_delta` / `tool` の `parentToolId`（サブエージェントの中のイベント）を追加（3.6）。どちらも足しただけで、Codex 側の対応は任意 | Claude |
+| 2026-11-24 | 11 | 巻き戻しとフォーク（3.7）。`message` に `rewindable`、`DriverEvent` に `rewound`、`UserAction` に `rewind`（`RewindRestore`）、`AgentDriver` に `supportsRewind` / `forkToken` を追加。どれも省略可で、Codex 側の対応は任意 | Claude |

@@ -16,6 +16,12 @@ import type { ProcessLauncher } from './launcher.ts';
 import { StreamMapper } from './mapper.ts';
 import { answerToUpdatedInput, buildPrompt, sessionAllowKey, toClaudePermissionMode } from './permissions.ts';
 import { childEnv, probeControl } from './probe.ts';
+import { formatResumeToken, parseResumeToken, parseTranscript, resumeArgs, rewindPoint, transcriptPath } from './history.ts';
+
+/** ファイルの巻き戻し（rewind_files）に使う、ファイルの変更前の控えを CLI に取らせる（ヘッドレスでは既定で取らない） */
+const CHECKPOINT_ENV = { CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: 'true' };
+/** ファイルの巻き戻しを待つ上限 */
+const REWIND_FILES_TIMEOUT_MS = 60_000;
 
 /** 中断要求に CLI が応じないとき、プロセスを終了させるまでの待ち時間 */
 const INTERRUPT_TIMEOUT_MS = 5000;
@@ -54,6 +60,10 @@ export interface ClaudeSessionDeps {
   resolveDefaults?: boolean;
   /** 画像以外の添付ファイルの置き場所。省略時は画像だけ受け付ける */
   attachments?: AttachmentStore;
+  /** 巻き戻し（rewind）を受け付けるか（起動役が会話の記録を読めるとき。省略時は受け付けない） */
+  rewind?: boolean;
+  /** claude CLI の設定フォルダ（CLAUDE_CONFIG_DIR）。省略時は起動先のホームの .claude */
+  configDir?: string;
 }
 
 /** 既定やエイリアスを解決した、実際に使われるモデルとエフォート */
@@ -180,6 +190,9 @@ export class ClaudeSession implements DriverSession {
       case 'set_model':
         await this.setModel(action.model, action.effort);
         return;
+      case 'rewind':
+        await this.rewind(action.messageId, action.restore);
+        return;
     }
   }
 
@@ -229,9 +242,12 @@ export class ClaudeSession implements DriverSession {
     // 添付ファイルを変換できなければ、プロセスを起動する前に失敗させる（Hub が呼び出し元にエラーを返す）
     const { content, infos } = buildUserContent(this.opts.sessionId, text, attachments, this.deps.attachments);
     this.ensureProcess();
-    this.write({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
-    const ev: DriverEvent = { type: 'message', messageId: `u-${Date.now().toString(36)}-${this.msgCounter++}`, role: 'user', text };
+    // 発言に付けた uuid は、CLI の会話の記録でもそのまま使われる。巻き戻し・フォークでこの発言を指すのに使う
+    const uuid = randomUUID();
+    this.write({ type: 'user', uuid, message: { role: 'user', content }, parent_tool_use_id: null });
+    const ev: DriverEvent = { type: 'message', messageId: uuid, role: 'user', text };
     if (infos.length > 0) ev.attachments = infos;
+    if (this.deps.rewind) ev.rewindable = true;
     this.emit(ev);
     if (this.status !== 'waiting_approval' && this.status !== 'waiting_input') this.setStatus('running');
   }
@@ -251,14 +267,15 @@ export class ClaudeSession implements DriverSession {
     ];
     if (this.model) args.push('--model', this.model);
     if (this.effort) args.push('--effort', this.effort);
-    if (this.resumeToken) args.push('--resume', this.resumeToken);
+    // 再開（巻き戻し・フォークの後は、途中までの会話を新しい session_id で始める）
+    args.push(...resumeArgs(parseResumeToken(this.resumeToken)));
     // 添付ファイルの置き場所を、確認なしで読めるフォルダに加える
     if (this.deps.attachments) args.push('--add-dir', this.deps.attachments.dir(this.opts.sessionId));
     // Hub の API で新しいセッションを作る方法を伝える（hub-guide.ts）
     const guide = hubGuide(this.deps.env);
     if (guide) args.push('--append-system-prompt', guide);
 
-    const env = withHubEnv(childEnv(this.deps.env), this.opts.sessionId);
+    const env = withHubEnv({ ...childEnv(this.deps.env), ...CHECKPOINT_ENV }, this.opts.sessionId);
 
     this.setStatus('starting');
     this.killedOnPurpose = false;
@@ -500,6 +517,75 @@ export class ClaudeSession implements DriverSession {
     // 反映できた分を含む現在の設定を知らせる（何も変わらなくても、Web の切り替え中の表示を解くために送る）
     this.emitModel();
     if (changed) void this.refreshResolved();
+  }
+
+  // ---- 巻き戻し（v11） ----
+
+  /**
+   * ユーザーの発言 messageId の直前まで巻き戻す。
+   * - ファイル: `claude -p --resume <id> --rewind-files <発言の uuid>` で、発言の直前の内容に戻す（CLI が取った控えを使う）
+   * - 会話: 次の起動を `--resume <id> --resume-session-at <発言の直前の記録> --fork-session` にする（history.ts）
+   * どちらもプロセスを終わらせてから行う。ファイルを戻せなかったら会話も戻さずに例外にする。
+   */
+  private async rewind(messageId: string, restore: 'conversation' | 'code' | 'both'): Promise<void> {
+    if (!this.deps.rewind || !this.deps.launcher.readText) throw new Error('この環境では巻き戻せません');
+    if (this.status === 'running' || this.status === 'waiting_approval' || this.status === 'waiting_input' || this.interrupting) {
+      throw new Error('作業中は巻き戻せません。中断してから巻き戻してください');
+    }
+    const ref = parseResumeToken(this.resumeToken);
+    if (!ref?.sessionId) throw new Error('巻き戻せる会話がありません');
+    // 先に記録を読んで、発言が見つかることを確かめる（見つからなければ何も変えない）
+    const file = await transcriptPath(this.deps.launcher, this.deps.configDir, this.opts.cwd, ref.sessionId);
+    const text = await this.deps.launcher.readText(file);
+    if (text === null) throw new Error('claude CLI の会話の記録が見つかりません');
+    const point = rewindPoint(parseTranscript(text), messageId);
+
+    await this.closeProcess();
+
+    if (restore !== 'conversation') {
+      const r = await this.deps.launcher.run(
+        {
+          command: this.deps.claudePath,
+          args: ['-p', '--resume', ref.sessionId, '--rewind-files', messageId],
+          cwd: this.opts.cwd,
+          env: { ...childEnv(this.deps.env), ...CHECKPOINT_ENV },
+        },
+        REWIND_FILES_TIMEOUT_MS,
+      );
+      if (r.code !== 0) {
+        const detail = (r.stderr.trim() || r.stdout.trim()).split('\n').slice(-2).join('\n');
+        throw new Error(`ファイルを戻せませんでした${detail ? `: ${detail}` : ''}`);
+      }
+    }
+    if (restore !== 'code') {
+      // 発言が会話の最初なら、何も引き継がずに新しく始める
+      this.resumeToken = formatResumeToken(point ? { sessionId: ref.sessionId, at: point, fork: true } : { sessionId: '' });
+      this.emit({ type: 'resume_token', token: this.resumeToken });
+      this.emit({ type: 'rewound', messageId });
+    }
+    if (this.status !== 'idle') this.setStatus('idle');
+  }
+
+  /** ターンの合間に、プロセスを終わらせる（次の送信で起動し直す）。状態は変えない */
+  private async closeProcess(): Promise<void> {
+    const proc = this.proc;
+    if (!proc) return;
+    this.killedOnPurpose = true;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        proc.kill();
+        resolve();
+      }, STOP_TIMEOUT_MS);
+      proc.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      proc.stdin.end();
+    });
+    if (this.proc === proc) {
+      this.proc = null;
+      this.failOutgoing('claude CLI を終了しました');
+    }
   }
 
   // ---- ターン・プロセスの終わり ----

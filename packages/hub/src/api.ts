@@ -89,6 +89,10 @@ export interface AgentInfo {
   attachments: boolean;
   /** スラッシュコマンドの一覧を出せるか（Driver の listCommands） */
   commands: boolean;
+  /** 送った発言まで巻き戻せるか（Driver の supportsRewind。v11） */
+  rewind: boolean;
+  /** 送った発言からフォークできるか（Driver の forkToken。v11） */
+  fork: boolean;
 }
 
 export interface HubInfo {

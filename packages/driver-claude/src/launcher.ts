@@ -36,6 +36,11 @@ export interface ProcessLauncher {
   run(spec: LaunchSpec, timeoutMs?: number): Promise<RunResult>;
   /** 起動先のマシンのファイル・フォルダを消す（無ければ何もしない） */
   remove(paths: string[]): Promise<void>;
+  /**
+   * 起動先のマシンのテキストファイルを読む（無ければ null）。会話の記録（jsonl）から巻き戻し・フォークの位置を探すのに使う。
+   * 省略した起動役では、巻き戻しとフォークを使えない
+   */
+  readText?(path: string): Promise<string | null>;
 }
 
 function currentOs(): MachineOs {
@@ -70,6 +75,14 @@ export function createLocalLauncher(): ProcessLauncher {
     },
     async remove(paths) {
       for (const p of paths) fs.rmSync(p, { recursive: true, force: true });
+    },
+    async readText(p) {
+      try {
+        return await fs.promises.readFile(p, 'utf8');
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw e;
+      }
     },
   };
 }

@@ -17,7 +17,17 @@ export interface ToolItem {
 }
 
 export type Item =
-  | { kind: 'user'; key: string; text: string; attachments?: AttachmentInfo[] }
+  | {
+      kind: 'user';
+      key: string;
+      text: string;
+      attachments?: AttachmentInfo[];
+      messageId: string;
+      /** 送った時刻 */
+      at: string;
+      /** ここまで巻き戻せる・ここからフォークできる（v11） */
+      rewindable: boolean;
+    }
   | { kind: 'assistant'; key: string; text: string; streaming: boolean }
   | { kind: 'tools'; key: string; tools: ToolItem[] }
   | { kind: 'approval'; key: string; req: ApprovalEv; at: string; decision?: ApprovalDecision }
@@ -104,13 +114,16 @@ export function buildItems(events: SessionEvent[], opts: { inner?: boolean; suba
   let model: string | undefined;
 
   const subagentShown = new Set<string>();
+  /** ユーザーの発言の messageId → items の位置（巻き戻しで使う） */
+  const userIndex = new Map<string, number>();
 
   for (const ev of events) {
     if (!inner && parentOf(ev)) continue;
     switch (ev.type) {
       case 'message': {
         if (ev.role === 'user') {
-          items.push({ kind: 'user', key: `u${ev.seq}`, text: ev.text, attachments: ev.attachments });
+          userIndex.set(ev.messageId, items.length);
+          items.push({ kind: 'user', key: `u${ev.seq}`, text: ev.text, attachments: ev.attachments, messageId: ev.messageId, at: ev.at, rewindable: ev.rewindable === true });
           break;
         }
         const i = msgIndex.get(ev.messageId);
@@ -181,6 +194,18 @@ export function buildItems(events: SessionEvent[], opts: { inner?: boolean; suba
         if (i !== undefined) items[i] = { ...(items[i] as Extract<Item, { kind: 'question' }>), resolved: true };
         break;
       }
+      case 'rewound': {
+        // 巻き戻した発言から後を消す（エージェントの文脈からも外れている）
+        // （rewoundEvents を通したイベント列では、すでに消えている）
+        const p = userIndex.get(ev.messageId);
+        if (p !== undefined) {
+          items.length = p;
+          for (const m of [msgIndex, approvalIndex, questionIndex, userIndex]) for (const [k, i] of m) if (i >= p) m.delete(k);
+          for (const [k, pos] of toolIndex) if (pos.item >= p) toolIndex.delete(k);
+        }
+        items.push({ kind: 'note', key: `r${ev.seq}`, text: 'ここまで巻き戻しました' });
+        break;
+      }
       case 'status':
         if (ev.reason) items.push({ kind: 'note', key: `n${ev.seq}`, text: ev.reason });
         else if (ev.status === 'stopped') items.push({ kind: 'note', key: `n${ev.seq}`, text: 'セッションを停止しました' });
@@ -212,6 +237,29 @@ export function buildItems(events: SessionEvent[], opts: { inner?: boolean; suba
   }
   // 状態が変わらないまま終わったツール（中断など）は実行中のままにしない
   return items;
+}
+
+/**
+ * 巻き戻し（rewound）を反映したイベント列（v11）。巻き戻した発言から rewound の直前までを除き、rewound は
+ * その発言のあった位置に残す（「ここまで巻き戻しました」の表示に使う）。サブエージェントの一覧なども、これを使って数える。
+ */
+export function rewoundEvents(events: SessionEvent[]): SessionEvent[] {
+  if (!events.some((e) => e.type === 'rewound')) return events;
+  const out: SessionEvent[] = [];
+  const userPos = new Map<string, number>();
+  for (const ev of events) {
+    if (ev.type === 'rewound') {
+      const p = userPos.get(ev.messageId);
+      if (p !== undefined) {
+        out.length = p;
+        for (const [id, i] of userPos) if (i >= p) userPos.delete(id);
+      }
+    } else if (ev.type === 'message' && ev.role === 'user') {
+      userPos.set(ev.messageId, out.length);
+    }
+    out.push(ev);
+  }
+  return out;
 }
 
 /** unified diff を行ごとの種類に分ける */

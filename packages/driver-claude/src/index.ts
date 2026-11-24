@@ -8,6 +8,7 @@ import { createLocalAttachmentStore, type AttachmentStore } from './attachments.
 import { checkClaudeAuth } from './auth.ts';
 import { createLocalLauncher, pathFor, type ProcessLauncher } from './launcher.ts';
 import { probeControl } from './probe.ts';
+import { forkPoint, formatResumeToken, parseResumeToken, parseTranscript, projectDirName, transcriptPath } from './history.ts';
 import { ClaudeSession } from './session.ts';
 
 export { checkClaudeAuth, mapAuthMethod, detectApiKeyEnv } from './auth.ts';
@@ -42,16 +43,7 @@ export function findClaude(env: NodeJS.ProcessEnv = process.env): string {
   return exe;
 }
 
-/**
- * claude CLI がセッションの履歴を置くフォルダ名。作業フォルダの英数字以外を `-` に置き換えたもの
- * （例: `C:\Users\me\work` → `C--Users-me-work`）。Claude Code 2.1.327 で確認。
- */
-export function projectDirName(cwd: string): string {
-  return cwd.replace(/[^a-zA-Z0-9]/g, '-');
-}
-
-/** resume_token（= session_id）として受け付ける形。パスに使うので、区切り文字などは通さない。 */
-const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
+export { projectDirName, parseResumeToken, formatResumeToken, forkPoint, rewindPoint, parseTranscript } from './history.ts';
 
 /** initialize の応答の commands を SlashCommand に直す。内部用（__ で始まる名前）は除く */
 export function parseCommands(v: unknown): SlashCommand[] {
@@ -77,14 +69,20 @@ export function createClaudeDriver(options: ClaudeDriverOptions = {}): AgentDriv
   // SSH 先などでは、Hub のPCに保存したファイルを CLI から読めないので、画像以外は受け付けない
   const attachments = options.attachments ?? (options.launcher ? undefined : createLocalAttachmentStore());
 
+  // CLAUDE_CONFIG_DIR は local のときだけ見る（ssh 先の環境変数は分からない）
+  const configDir = !options.launcher && env.CLAUDE_CONFIG_DIR ? env.CLAUDE_CONFIG_DIR : undefined;
+  // 巻き戻しとフォークは、会話の記録（jsonl）を読める起動役のときだけ
+  const canRewind = typeof launcher.readText === 'function';
+
   return {
     kind: 'claude',
     supportsAttachments: true,
+    supportsRewind: canRewind,
     checkAuth(): Promise<AuthCheck> {
       return checkClaudeAuth(launcher, claudePath, env);
     },
     async start(opts: StartOptions, emit: (event: DriverEvent) => void): Promise<DriverSession> {
-      const session = new ClaudeSession(opts, emit, { launcher, claudePath, env, resolveDefaults: options.resolveDefaults ?? true, attachments });
+      const session = new ClaudeSession(opts, emit, { launcher, claudePath, env, resolveDefaults: options.resolveDefaults ?? true, attachments, configDir, rewind: canRewind });
       await session.init();
       return session;
     },
@@ -94,13 +92,25 @@ export function createClaudeDriver(options: ClaudeDriverOptions = {}): AgentDriv
       return parseCommands(res.commands);
     },
     async deleteHistory(target: { cwd: string; resumeToken: string }): Promise<void> {
-      if (!SESSION_ID_RE.test(target.resumeToken)) throw new Error('resume_token の形式が正しくありません');
+      const ref = parseResumeToken(target.resumeToken);
+      if (!ref) throw new Error('resume_token の形式が正しくありません');
+      // まだ起動していないフォーク・巻き戻し（|fork）の session_id は元のセッションのものなので消さない
+      if (!ref.sessionId || ref.fork) return;
       const p = pathFor(launcher.os);
-      // CLAUDE_CONFIG_DIR は local のときだけ見る（ssh 先の環境変数は分からない）
-      const configDir = !options.launcher && env.CLAUDE_CONFIG_DIR ? env.CLAUDE_CONFIG_DIR : p.join(await launcher.homeDir(), '.claude');
-      const dir = p.join(configDir, 'projects', projectDirName(target.cwd));
+      const dir = p.join(configDir || p.join(await launcher.homeDir(), '.claude'), 'projects', projectDirName(target.cwd));
       // 会話の記録（<id>.jsonl）と、サブエージェントなどの記録を置く同名のフォルダ
-      await launcher.remove([p.join(dir, `${target.resumeToken}.jsonl`), p.join(dir, target.resumeToken)]);
+      await launcher.remove([p.join(dir, `${ref.sessionId}.jsonl`), p.join(dir, ref.sessionId)]);
     },
+    forkToken: canRewind
+      ? async (target) => {
+          const ref = parseResumeToken(target.resumeToken);
+          if (!ref?.sessionId) throw new Error('フォークできる会話がありません');
+          const text = await launcher.readText!(await transcriptPath(launcher, configDir, target.cwd, ref.sessionId));
+          if (text === null) throw new Error('claude CLI の会話の記録が見つかりません');
+          // 発言が最後のターンなら、元のセッションと同じ位置（途中から始める予定ならその位置）まで引き継ぐ
+          const at = forkPoint(parseTranscript(text), target.messageId) ?? ref.at;
+          return formatResumeToken({ sessionId: ref.sessionId, at, fork: true });
+        }
+      : undefined,
   };
 }

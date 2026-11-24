@@ -95,6 +95,9 @@ function parseAction(body: unknown): UserAction {
       if (b.effort !== undefined) a.effort = b.effort as EffortLevel | null;
       return a;
     }
+    case 'rewind':
+      if (typeof b.messageId !== 'string' || !b.messageId || !['conversation', 'code', 'both'].includes(String(b.restore))) break;
+      return { type: 'rewind', messageId: b.messageId, restore: b.restore as 'conversation' | 'code' | 'both' };
   }
   throw new HttpError(400, '操作の形が正しくありません');
 }
@@ -220,6 +223,12 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   app.post<{ Params: { id: string } }>('/api/sessions/:id/action', { bodyLimit: ACTION_BODY_LIMIT }, async (req) => {
     await manager.action(req.params.id, parseAction(req.body));
     return { ok: true };
+  });
+  // フォーク（v11）: messageId（ユーザーの発言）のターンの終わりまでを引き継ぐ新しいセッションを作る
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/fork', async (req) => {
+    const messageId = (req.body as { messageId?: unknown } | undefined)?.messageId;
+    if (typeof messageId !== 'string' || !messageId) throw new HttpError(400, 'messageId を指定してください');
+    return manager.fork(req.params.id, messageId);
   });
   // 入力欄のスラッシュコマンドの補完
   app.get<{ Params: { id: string } }>('/api/sessions/:id/commands', async (req): Promise<SlashCommand[]> => manager.commands(req.params.id));

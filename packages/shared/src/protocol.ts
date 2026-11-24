@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -158,6 +158,11 @@ export type DriverEvent =
       attachments?: AttachmentInfo[];
       /** v10: サブエージェントの発話なら、それを起動したツールの toolId（`subagent` イベントの toolId） */
       parentToolId?: string;
+      /**
+       * v11: ユーザーの発言で、この発言まで巻き戻す（rewind）・ここからフォークする（forkToken）ことができる。
+       * Driver が対応していて、この messageId をエージェント側の発言と結び付けられるときだけ true にする。
+       */
+      rewindable?: boolean;
     }
   | {
       type: 'tool';
@@ -246,6 +251,11 @@ export type DriverEvent =
       resolvedModel?: string;
       resolvedEffort?: EffortLevel;
     }
+  /**
+   * v11: 会話を巻き戻した。messageId（ユーザーの発言）とそれより後の会話は、以後のエージェントの文脈に含まれない。
+   * Hub と Web は、この発言から rewound までの記録を会話の表示から外す。
+   */
+  | { type: 'rewound'; messageId: string }
   | {
       type: 'usage';
       label: string;
@@ -288,7 +298,16 @@ export type UserAction =
    * 実行中にモデルとエフォートを変える。省略した項目は変えず、null はエージェントの既定に戻す。
    * 反映できたら Driver が model イベントを送る。できなければ error（fatal: false）を送り、元の設定のままにする。
    */
-  | { type: 'set_model'; model?: string | null; effort?: EffortLevel | null };
+  | { type: 'set_model'; model?: string | null; effort?: EffortLevel | null }
+  /**
+   * v11: ユーザーの発言（messageId。rewindable のもの）の直前まで巻き戻す。Hub はターンの途中（作業中・待ち）では送らない。
+   * restore: 'conversation' は会話だけ、'code' はファイルだけ（その発言の直前の内容に戻す）、'both' は両方。
+   * 会話を戻したら Driver が rewound を送る。失敗したら例外にする（Hub が Web にエラーを返す）。
+   */
+  | { type: 'rewind'; messageId: string; restore: RewindRestore };
+
+/** 巻き戻しで戻すもの（v11） */
+export type RewindRestore = 'conversation' | 'code' | 'both';
 
 /** 各 Driver パッケージが実装するインターフェース。 */
 export interface AgentDriver {
@@ -310,6 +329,15 @@ export interface AgentDriver {
   listCommands?(cwd: string): Promise<SlashCommand[]>;
   /** 任意（v7）。添付ファイルを受け付けるか。省略か false なら、Hub は添付つきの send を拒否する */
   readonly supportsAttachments?: boolean;
+  /** 任意（v11）。UserAction の rewind を受け付けるか。省略か false なら、Hub は rewind を拒否する */
+  readonly supportsRewind?: boolean;
+  /**
+   * 任意（v11）。セッションをフォークする。messageId（rewindable なユーザーの発言）のターンの終わりまでの会話を引き継ぐ
+   * 新しいセッションの resumeToken を返す（Hub はこれを StartOptions.resumeToken に渡して新しいセッションを始める）。
+   * エージェント側の新しい ID は、起動後に resume_token で送り直してよい。元のセッションは変えない。
+   * 実装しない Driver では、Web はフォークを出さない。
+   */
+  forkToken?(target: { cwd: string; resumeToken: string; messageId: string }): Promise<string>;
 }
 
 export interface DriverSession {

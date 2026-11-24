@@ -570,3 +570,85 @@ describe('AI からのセッション作成', () => {
     store.close();
   });
 });
+
+/** 巻き戻しとフォークに対応した Driver（v11） */
+class RewindDriver extends TestDriver {
+  readonly supportsRewind = true;
+  forks: { cwd: string; resumeToken: string; messageId: string }[] = [];
+  async forkToken(target: { cwd: string; resumeToken: string; messageId: string }) {
+    this.forks.push(target);
+    return `${target.resumeToken}|at=x|fork`;
+  }
+}
+
+describe('巻き戻しとフォーク（v11）', () => {
+  /** u1 → a1 → u2 → a2 の2ターンを終えたセッション */
+  async function twoTurns(driver: RewindDriver) {
+    const { manager, store } = setup(driver);
+    const s = await manager.create({ cwd: config.folders[0].path, prompt: 'hi' });
+    driver.emit({ type: 'message', messageId: 'u1', role: 'user', text: '一つ目', rewindable: true });
+    driver.emit({ type: 'tool', toolId: 't1', name: 'Edit', summary: 'a.txt', state: 'done' });
+    driver.emit({ type: 'message', messageId: 'a1', role: 'assistant', text: '答え1' });
+    driver.emit({ type: 'status', status: 'idle' });
+    driver.emit({ type: 'message', messageId: 'u2', role: 'user', text: '二つ目', rewindable: true });
+    driver.emit({ type: 'message', messageId: 'a2', role: 'assistant', text: '答え2' });
+    driver.emit({ type: 'status', status: 'idle' });
+    return { manager, store, s };
+  }
+
+  it('巻き戻しは作業中には受け付けず、rewindable な発言だけを Driver に渡す', async () => {
+    const driver = new RewindDriver();
+    const { manager, store, s } = await twoTurns(driver);
+    await expect(manager.action(s.id, { type: 'rewind', messageId: 'nope', restore: 'both' })).rejects.toThrow('巻き戻せません');
+    driver.emit({ type: 'status', status: 'running' });
+    await expect(manager.action(s.id, { type: 'rewind', messageId: 'u2', restore: 'both' })).rejects.toThrow('作業中');
+    driver.emit({ type: 'status', status: 'idle' });
+    await manager.action(s.id, { type: 'rewind', messageId: 'u2', restore: 'conversation' });
+    expect(driver.actions).toContainEqual({ type: 'rewind', messageId: 'u2', restore: 'conversation' });
+    store.close();
+  });
+
+  it('対応していない Driver では巻き戻せず、フォークもできない', async () => {
+    const { manager, store } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, prompt: 'hi' });
+    await expect(manager.action(s.id, { type: 'rewind', messageId: 'u1', restore: 'both' })).rejects.toThrow('巻き戻せません');
+    await expect(manager.fork(s.id, 'u1')).rejects.toThrow('フォーク');
+    expect(manager.features('claude')).toMatchObject({ rewind: false, fork: false });
+    store.close();
+  });
+
+  it('フォークは発言のターンの終わりまでを写し、Driver の resumeToken で新しいセッションを作る', async () => {
+    const driver = new RewindDriver();
+    const { manager, store, s } = await twoTurns(driver);
+    const f = await manager.fork(s.id, 'u1');
+    expect(driver.forks[0]).toEqual({ cwd: config.folders[0].path, resumeToken: `token-${s.id}`, messageId: 'u1' });
+    expect(f).toMatchObject({ title: `${manager.get(s.id).title}（フォーク）`, status: 'idle', live: false, resumable: true, empty: false });
+    const texts = manager.events(f.id, 0).filter((e) => e.type === 'message').map((e) => (e.type === 'message' ? e.text : ''));
+    expect(texts).toEqual(['一つ目', '答え1']);
+    expect(manager.events(f.id, 0).some((e) => e.type === 'tool')).toBe(true);
+    // 送信すると、受け取った resumeToken で起動する
+    await manager.action(f.id, { type: 'send', text: '続き' });
+    expect(driver.starts[driver.starts.length - 1].resumeToken).toBe(`token-${s.id}|at=x|fork`);
+    store.close();
+  });
+
+  it('巻き戻した発言（rewound の後）からはフォークできず、写す会話にも入らない', async () => {
+    const driver = new RewindDriver();
+    const { manager, store, s } = await twoTurns(driver);
+    driver.emit({ type: 'rewound', messageId: 'u2' });
+    await expect(manager.fork(s.id, 'u2')).rejects.toThrow('フォークできません');
+    const f = await manager.fork(s.id, 'u1');
+    const texts = manager.events(f.id, 0).filter((e) => e.type === 'message').map((e) => (e.type === 'message' ? e.text : ''));
+    expect(texts).toEqual(['一つ目', '答え1']);
+    store.close();
+  });
+
+  it('まだ終わっていない最後のターンからはフォークできない', async () => {
+    const driver = new RewindDriver();
+    const { manager, store, s } = await twoTurns(driver);
+    driver.emit({ type: 'status', status: 'running' });
+    await expect(manager.fork(s.id, 'u2')).rejects.toThrow('終わって');
+    await expect(manager.fork(s.id, 'u1')).resolves.toBeTruthy();
+    store.close();
+  });
+});

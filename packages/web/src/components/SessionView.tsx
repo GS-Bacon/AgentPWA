@@ -1,19 +1,18 @@
 // セッションの中身（会話・許可要求・入力欄）。iPhone の詳細画面と、iPad / Web のペインで共通に使う。
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { AttachmentInfo } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { getState, loadEvents, run, useStore } from '../lib/store.ts';
 import { relPath } from '../lib/format.ts';
 import { unarchiveSession } from '../lib/sessionActions.ts';
-import { buildItems, buildSubagents, type Item, type SubagentInfo, type ToolItem } from '../lib/transcript.ts';
+import { buildItems, buildSubagents, rewoundEvents, type Item, type SubagentInfo, type ToolItem } from '../lib/transcript.ts';
 import { SubagentLine, SubCtx, SubPane, subLabel, subOfRequest, useSubCtx, type SubLayout, type SubPaneState } from './Subagents.tsx';
 import { ApprovalCard, QuestionCard } from './Requests.tsx';
-import { IconChevron, IconFile } from './Icons.tsx';
+import { IconChevron } from './Icons.tsx';
 import { Composer, useFiles } from './Composer.tsx';
-import { formatBytes } from '../lib/attachments.ts';
 import { openFile } from '../lib/viewer.ts';
 import { PathMarkdown } from './PathMarkdown.tsx';
+import { UserMessage } from './UserMessage.tsx';
 
 function ToolLine({ t, cwd, sessionId }: { t: ToolItem; cwd: string; sessionId: string }) {
   const [open, setOpen] = useState(false);
@@ -87,20 +86,6 @@ function ToolGroup({ tools, cwd, sessionId }: { tools: ToolItem[]; cwd: string; 
   );
 }
 
-function AttachmentList({ items }: { items: AttachmentInfo[] }) {
-  return (
-    <div className="msg-attach">
-      {items.map((a, i) => (
-        <span key={i} className="msg-attach-item" title={`${a.name}（${a.mimeType}）`}>
-          <IconFile size={12} />
-          <span className="ellipsis">{a.name}</span>
-          <span className="muted">{formatBytes(a.size)}</span>
-        </span>
-      ))}
-    </div>
-  );
-}
-
 /** サブエージェントが出した許可要求・質問には、出どころを添える */
 function SubOrigin({ requestId }: { requestId: string }) {
   const sub = subOfRequest(useSubCtx(), requestId);
@@ -112,16 +97,21 @@ function SubOrigin({ requestId }: { requestId: string }) {
   );
 }
 
-function ItemView({ item, session, focused }: { item: Item; session: SessionSummary; focused: boolean }) {
+function ItemView({ item, session, focused, lastUser = false }: { item: Item; session: SessionSummary; focused: boolean; lastUser?: boolean }) {
   switch (item.kind) {
     case 'subagent':
       return <SubagentLine toolId={item.toolId} />;
     case 'user':
       return (
-        <div className="msg-user">
-          {item.text}
-          {item.attachments && item.attachments.length > 0 && <AttachmentList items={item.attachments} />}
-        </div>
+        <UserMessage
+          session={session}
+          messageId={item.messageId}
+          text={item.text}
+          at={item.at}
+          attachments={item.attachments}
+          rewindable={item.rewindable}
+          last={lastUser}
+        />
       );
     case 'assistant':
       return <PathMarkdown text={item.text} sessionId={session.id} />;
@@ -224,7 +214,9 @@ export function SessionView({
   /** サブエージェントの出し方（スマホは 'full'） */
   subLayout?: 'split' | 'full';
 }) {
-  const events = useStore((s) => s.events[session.id]);
+  const rawEvents = useStore((s) => s.events[session.id]);
+  // 巻き戻した範囲は、会話にもサブエージェントの一覧にも出さない
+  const events = useMemo(() => rawEvents && rewoundEvents(rawEvents), [rawEvents]);
   const items = useMemo(() => buildItems(events ?? []), [events]);
   const full = subLayout === 'full';
   const { subs, ui, setUi } = useSubagents(session, events, full);
@@ -254,6 +246,7 @@ export function SessionView({
     [session.id, subMap, layout, select, waiting, renderItem],
   );
   const showPane = layout !== 'inline' && ui.visible && subs.length > 0;
+  const lastUserKey = useMemo(() => [...items].reverse().find((i) => i.kind === 'user')?.key, [items]);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const files = useFiles();
@@ -349,7 +342,7 @@ export function SessionView({
         <div className="transcript">
           {!events && <div className="note">読み込み中…</div>}
           {items.map((it) => (
-            <ItemView key={it.key} item={it} session={session} focused={focused} />
+            <ItemView key={it.key} item={it} session={session} focused={focused} lastUser={it.key === lastUserKey} />
           ))}
           {session.pendingApprovals
             .filter((a) => !shownApprovals.has(a.requestId))

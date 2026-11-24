@@ -45,6 +45,8 @@ export const api = {
   discard: (id: string) => req<{ removed: boolean }>('POST', `/api/sessions/${id}/discard`),
   read: (id: string, seq: number) => req<SessionSummary>('POST', `/api/sessions/${id}/read`, { seq }),
   action: (id: string, action: UserAction) => req<{ ok: true }>('POST', `/api/sessions/${id}/action`, action),
+  /** 発言 messageId のターンの終わりまでを引き継ぐ、新しいセッションを作る（v11） */
+  fork: (id: string, messageId: string) => req<SessionSummary>('POST', `/api/sessions/${id}/fork`, { messageId }),
   /** 入力欄のスラッシュコマンドの補完（Hub が CLI に聞くので、初回は数秒かかる） */
   commands: (id: string) => req<SlashCommand[]>('GET', `/api/sessions/${id}/commands`),
   /** 名前の変更とアーカイブ・解除（アーカイブすると Hub が動いているセッションを止める） */

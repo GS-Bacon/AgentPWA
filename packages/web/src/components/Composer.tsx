@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
-import { run, showToast, useStore } from '../lib/store.ts';
+import { clearDraft, run, showToast, useStore } from '../lib/store.ts';
 import { isRunning } from '../lib/format.ts';
 import { filterCommands, slashQuery, useCommands } from '../lib/commands.ts';
 import { formatBytes, MAX_ATTACHMENTS, MAX_TOTAL_BYTES, nameForPasted, releasePending, toAttachment, toPending, type PendingFile } from '../lib/attachments.ts';
@@ -79,6 +79,19 @@ export function Composer({ session, compact, files }: { session: SessionSummary;
   const archived = session.archived;
   const features = useStore((s) => s.info?.agents[session.agent]);
   const canAttach = features?.attachments === true;
+
+  // 巻き戻した発言などを入力欄に入れる（store の setDraft）
+  const draft = useStore((s) => (s.draft?.sessionId === session.id ? s.draft : null));
+  useEffect(() => {
+    if (!draft) return;
+    setText(draft.text);
+    const el = ref.current;
+    if (el) {
+      el.focus();
+      el.setSelectionRange(draft.text.length, draft.text.length);
+    }
+    clearDraft(draft.n);
+  }, [draft]);
 
   // ---- スラッシュコマンドの補完 ----
   const query = slashQuery(text);

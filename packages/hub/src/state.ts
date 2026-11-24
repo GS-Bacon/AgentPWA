@@ -151,6 +151,27 @@ export function applyEvent(rec: SessionRecord, ev: SessionEvent): SessionRecord 
   return r;
 }
 
+/**
+ * 巻き戻し（rewound）を反映したイベント列。巻き戻した発言から rewound までのイベントと、rewound 自体を除く。
+ * フォークで会話を写すときに使う（Web の表示は transcript.ts が同じ規則で組み立てる）。
+ */
+export function effectiveEvents<T extends SessionEvent>(events: T[]): T[] {
+  const out: T[] = [];
+  const userPos = new Map<string, number>();
+  for (const ev of events) {
+    if (ev.type === 'rewound') {
+      const p = userPos.get(ev.messageId);
+      if (p === undefined) continue;
+      out.length = p;
+      for (const [id, i] of userPos) if (i >= p) userPos.delete(id);
+      continue;
+    }
+    if (ev.type === 'message' && ev.role === 'user') userPos.set(ev.messageId, out.length);
+    out.push(ev);
+  }
+  return out;
+}
+
 /** 何も書き込まれていない（空の）セッションか */
 export function isEmptySession(rec: Pick<SessionRecord, 'started'>): boolean {
   return !rec.started;

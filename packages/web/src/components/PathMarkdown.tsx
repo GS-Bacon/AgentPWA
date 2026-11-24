@@ -38,7 +38,7 @@ export const PathMarkdown = memo(function PathMarkdown({ text, sessionId, classN
 });
 
 /** クリップボードへ書き込む。http で開いたとき（安全でない文脈）は navigator.clipboard が使えないので、古い方法で書き込む */
-async function copyText(text: string): Promise<boolean> {
+export async function copyText(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);

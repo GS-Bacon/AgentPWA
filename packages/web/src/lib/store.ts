@@ -17,6 +17,8 @@ export interface State {
   toast: Toast | null;
   /** 表示中の確認ダイアログ */
   confirm: ConfirmRequest | null;
+  /** 入力欄に入れてほしい文（巻き戻した発言など）。n は同じ文を続けて入れるときの区別 */
+  draft: { sessionId: string; text: string; n: number } | null;
 }
 
 /** 画面下の通知。action があれば「元に戻す」などのボタンを添える */
@@ -49,6 +51,7 @@ let state: State = {
   usage: { claude: [], codex: [] },
   toast: null,
   confirm: null,
+  draft: null,
 };
 
 const listeners = new Set<() => void>();
@@ -142,6 +145,23 @@ const openListeners = new Set<(id: string) => void>();
 export function onSessionCreatedByAgent(cb: (id: string) => void): () => void {
   openListeners.add(cb);
   return () => openListeners.delete(cb);
+}
+
+/** セッションを画面で開く（デスクトップは新しいペイン、iPhone は詳細画面）。フォークしたセッションを開くのに使う */
+export function openSession(id: string): void {
+  for (const l of openListeners) l(id);
+}
+
+let draftN = 0;
+
+/** セッションの入力欄に文を入れる（入力中の文は置き換える） */
+export function setDraft(sessionId: string, text: string): void {
+  set({ draft: { sessionId, text, n: ++draftN } });
+}
+
+/** 入力欄が文を受け取ったら消す（開き直したときに、もう一度入れないため） */
+export function clearDraft(n: number): void {
+  if (state.draft?.n === n) set({ draft: null });
 }
 
 /**
@@ -261,6 +281,11 @@ function putToast(t: Omit<Toast, 'id'>, ms: number): void {
 /** 失敗などの知らせ（エラー色の枠） */
 export function showToast(msg: string): void {
   putToast({ text: msg, tone: 'error' }, 5000);
+}
+
+/** 操作が済んだことの知らせ（数秒で消える） */
+export function showInfo(msg: string): void {
+  putToast({ text: msg, tone: 'info' }, 4000);
 }
 
 /** 「元に戻す」付きの知らせ（数秒で消える） */

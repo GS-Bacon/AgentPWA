@@ -158,6 +158,27 @@ kbd {
   background: var(--bg-muted); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 8px 12px; white-space: pre-wrap; word-break: break-word; align-self: stretch;
 }
+/* 送ったメッセージの下の操作（時刻・フォーク・巻き戻し・編集・コピー）。マウスでは重ねたときだけ出す */
+.msg-user-wrap { display: flex; flex-direction: column; gap: 2px; align-self: stretch; min-width: 0; }
+.msg-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-height: 28px; opacity: 0; transition: opacity 0.1s; }
+.msg-user-wrap:hover .msg-actions, .msg-user-wrap:focus-within .msg-actions { opacity: 1; }
+@media (hover: none) { .msg-actions { opacity: 1; } }
+.msg-time { font-size: 12px; color: var(--fg-muted); margin-right: 6px; white-space: nowrap; }
+.msg-action { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius); color: var(--fg-muted); }
+.msg-action:hover:not(:disabled) { color: var(--fg); background: var(--btn-bg); }
+.msg-action:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+.msg-action:disabled { opacity: 0.4; cursor: default; }
+.msg-edit { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-muted); padding: 8px; }
+.msg-edit .textarea { resize: none; min-height: 40px; }
+.msg-edit-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rewind-quote { border-left: 3px solid var(--border); padding: 2px 10px; color: var(--fg-muted); font-size: 13px; white-space: pre-wrap; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.rewind-options { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.rewind-option { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; cursor: pointer; }
+.rewind-option + .rewind-option { border-top: 1px solid var(--border); }
+.rewind-option.sel { background: var(--bg-muted); }
+.rewind-option input { margin: 3px 0 0; accent-color: var(--link); }
+.rewind-label { display: block; font-size: 14px; font-weight: 600; }
+.rewind-note { display: block; font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
 .msg-assistant { line-height: 1.65; word-break: break-word; }
 .msg-assistant > :first-child { margin-top: 0; }
 .msg-assistant > :last-child { margin-bottom: 0; }
