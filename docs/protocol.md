@@ -35,7 +35,16 @@ starting ──► running ──► idle ──(send)──► running
 2. **再開**: エージェント固有の ID が分かった時点で、すぐに `resume_token` を送る。Hub が落ちても、この値があれば `StartOptions.resumeToken` で再開できる。
 3. **プロセス管理**: `stop()` では子プロセスを確実に終了させ、最後に `status: stopped` を送る。CLI が勝手に落ちたら `error`（復帰できるなら `fatal: false`）を送る。
 4. **ID**: `messageId` / `toolId` / `requestId` は、セッション内で一意な文字列にする。エージェントの ID をそのまま使ってよい。
-5. **権限モード**: `PermissionMode` を、エージェント固有の設定に対応付ける。対応する設定がないモードは `ask` として扱い、`error`（`fatal: false`）で理由を知らせる。
+5. **権限モード**: `PermissionMode` を、エージェント固有の設定に対応付ける。対応する設定がないモードは `ask` として扱い、`error`（`fatal: false`）で理由を知らせる。詳しくは「3.1 権限モードの切り替え」を参照。
+
+### 3.1 権限モードの切り替え
+
+- 起動したら、実際に使っているモードを `permission_mode` で送る（対応がなく `ask` に落とした場合は `ask` を送る）。
+- `set_permission_mode` を受けたら、エージェントに反映してから `permission_mode` を送る。反映できなければ `error`（`fatal: false`）を送り、`permission_mode` は送らない（元のモードのまま）。
+- どの状態（`running` / `idle` / `waiting_*`）でも受け付ける。実行中のターンにすぐ効かないエージェントは、次のターンから反映し、そのことを `permission_mode` の送信時点で反映済みとみなしてよい（対応表に書く）。
+- エージェント自身がモードを変えたとき（例: Claude の計画モードの終了）も `permission_mode` を送る。
+- 切り替えても、すでに出ている `approval_request` は自動で解決しない。ユーザーが個別に決める。
+- `full_auto` は、Hub が「フォルダの許可リストで `full_auto` を許可したフォルダ」のセッションにだけ渡す。それ以外のセッションへの `set_permission_mode`（`full_auto`）は Hub が拒否し、Driver には届かない。
 
 ## 4. 単体での開発とフィクスチャ
 
@@ -56,6 +65,16 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | 許可要求 | `--permission-prompt-tool`（Hub 内の MCP ツール）経由で受けて、`approval_request` に変換する |
 | 再開 | `--resume <session_id>`（`resume_token` = session_id） |
 | 中断 | 実装時に確定する |
+| 権限モード（起動時） | `--permission-mode`: `ask`→`default`、`auto_edit`→`acceptEdits`、`full_auto`→`bypassPermissions`、`plan`→`plan` |
+| 権限モード（実行中） | 標準入力へ `control_request`（`subtype: set_permission_mode`）を送る。実行中のターンにもすぐ効く。`full_auto` へ後から切り替えられるよう、起動時に `--allow-dangerously-skip-permissions` を付ける（フラグ名とメッセージ形式は実装時に CLI で確認する） |
+| モードの通知 | stream-json の `system/init` の `permissionMode` と、計画モード終了（`ExitPlanMode`）の承認後に `permission_mode` を送る |
+
+### Codex への依頼（権限モード）
+
+Codex 担当で、次を対応表に追加してください（AGENTS.md と driver-codex は Codex 担当）。
+- `ask` / `auto_edit` / `full_auto` / `plan` と、承認ポリシー・サンドボックス設定（例: `full_auto` は承認なし）の対応
+- 実行中の切り替え方法（`turn/start` ごとに指定するなら「次のターンから反映」と明記）
+- `plan` に当たる設定がなければ、3章5の決まりどおり `ask` に落とす
 
 ### Codex（`codex app-server`）— Codex 担当
 
@@ -72,3 +91,4 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | 日付 | バージョン | 内容 | 提案 |
 |---|---|---|---|
 | 2026-11-24 | 1 | 初版 | Claude |
+| 2026-11-24 | 2 | 権限モード `full_auto` を追加。実行中の切り替え（`UserAction` の `set_permission_mode`）と、現在のモードの通知（`DriverEvent` の `permission_mode`）を追加 | Claude |
