@@ -61,7 +61,7 @@ export interface SessionSummary {
   pendingQuestions: QuestionRequest[];
 }
 
-/** プロジェクト（作業フォルダ）。使う AI はプロジェクトごとに固定する */
+/** プロジェクト（作業フォルダ）。agent は既定の AI（セッションごとに Claude / Codex を選び直せる） */
 export interface FolderEntry {
   name: string;
   path: string;
@@ -162,7 +162,7 @@ export interface CreateProjectRequest {
 }
 
 export interface CreateSessionRequest {
-  /** 省略時はプロジェクトの AI。指定してプロジェクトの AI と違えば 400 */
+  /** 省略時はプロジェクトの既定の AI（folders の agent）。指定すれば同じフォルダで別の AI も使える */
   agent?: AgentKind;
   /** 許可リストのフォルダのパス（AI が作るときは省略でき、作成元のセッションと同じフォルダになる） */
   cwd: string;

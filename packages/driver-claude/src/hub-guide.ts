@@ -27,7 +27,7 @@ export function hubGuide(env: NodeJS.ProcessEnv): string | undefined {
     '',
     '- prompt は必ず入れてください（何も書き込まれていないセッションは、ユーザーが閉じると消えます）。新しいセッションはこの会話を知らないので、必要な前提を prompt に書きます。',
     '- cwd を省くと、このセッションと同じプロジェクト（作業フォルダ）で始まります。別のプロジェクトにするときは "cwd" に登録済みのプロジェクトのフォルダの絶対パスを入れます。',
-    '- model・effort・permissionMode も指定できます（省略はプロジェクトの既定）。',
+    '- agent（"claude" / "codex"）・model・effort・permissionMode も指定できます（省略はプロジェクトの既定）。',
     '- 応答は新しいセッションの情報（JSON。id を含む）です。新しいセッションの結果は、この会話には戻ってきません。',
   ].join('\n');
 }

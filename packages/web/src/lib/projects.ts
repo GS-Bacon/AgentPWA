@@ -1,5 +1,6 @@
 // プロジェクト（作業フォルダ）ごとにセッションをまとめる。
-// プロジェクトは Hub の設定ファイルの folders の順に並べ、使う AI はプロジェクトごとに固定（folders の agent）。
+// プロジェクトは Hub の設定ファイルの folders の順に並べる。folders の agent はプロジェクトの既定の AI で、
+// 同じフォルダでもセッションごとに Claude / Codex を選べる（セッションの agent）。
 // 設定から外れたフォルダのセッションは、最後に「登録外」としてまとめる。
 // アーカイブしたセッションはプロジェクトに入れず、一覧の末尾の「アーカイブ済み」にまとめる（archivedSessions）。
 import type { AgentKind } from '@agentpwa/shared';
@@ -11,7 +12,7 @@ export interface Project {
   key: string;
   name: string;
   path: string;
-  /** このプロジェクトで使う AI */
+  /** このプロジェクトの既定の AI（セッションごとには違うこともある） */
   agent: AgentKind;
   /** プロジェクトの色（設定ファイルの folders の color） */
   color?: ProjectColor;

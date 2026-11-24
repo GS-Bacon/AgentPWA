@@ -106,7 +106,7 @@ export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
         {(info?.folders ?? []).map((f, i, all) => (
           <Row key={f.path} label={f.name}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: AGENT_COLOR[f.agent], fontSize: 13 }}>
-              <AgentIcon agent={f.agent} /> {AGENT_LABEL[f.agent]}
+              <AgentIcon agent={f.agent} /> 既定: {AGENT_LABEL[f.agent]}
               {/* 並び順（一覧の順。全端末で共有する） */}
               <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
                 <button className="btn btn-icon-sm" aria-label={`${f.name} を上へ`} title="上へ" disabled={i === 0} onClick={() => moveProject(f.path, i - 1)}>

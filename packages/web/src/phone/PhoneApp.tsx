@@ -1,7 +1,8 @@
 // iPhone: 下部タブ（セッション / 設定）と、上部のプロジェクトのタブ（すべて / プロジェクト…）。
-// AI はプロジェクトごとに固定なので、プロジェクトのタブの横のアイコンで示す。
+// プロジェクトのタブの横のアイコンはそのプロジェクトの既定の AI。既定と違う AI のセッションは、行にもアイコンを付ける。
 // セッションの詳細へは1画面ずつ遷移する。
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { AgentKind } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { discardIfEmpty, onSessionCreatedByAgent, onSessionsClosed, sortedSessions, useStore, waitingCount } from '../lib/store.ts';
 import type { ArchiveSectionProps } from '../App.tsx';
@@ -51,13 +52,15 @@ function useRoute(): [Route, (hash: string, replace?: boolean) => void] {
 }
 
 /** セッションの行。「すべて」ではプロジェクト名（と AI のアイコン）、プロジェクトのタブではマシン名を添える */
-function PhoneRow({ s, now, onOpen, showProject }: { s: SessionSummary; now: number; onOpen: () => void; showProject: boolean }) {
+function PhoneRow({ s, now, onOpen, showProject, projectAgent }: { s: SessionSummary; now: number; onOpen: () => void; showProject: boolean; projectAgent?: AgentKind }) {
   const place = showProject ? (
     <>
       <AgentIcon agent={s.agent} size={12} /> {s.folderName || shortPath(s.cwd)}
     </>
   ) : (
-    s.machine
+    <>
+      {projectAgent && s.agent !== projectAgent && <AgentIcon agent={s.agent} size={12} />} {s.machine}
+    </>
   );
   if (s.rank <= 3) {
     const approval = s.pendingApprovals[0];
@@ -275,7 +278,7 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
             ]
       }
     >
-      <PhoneRow s={s} now={now} showProject={!project} onOpen={() => go(`#/s/${s.id}`)} />
+      <PhoneRow s={s} now={now} showProject={!project} projectAgent={project?.agent} onOpen={() => go(`#/s/${s.id}`)} />
     </SwipeRow>
   );
   const total = waitingCount(sessions);

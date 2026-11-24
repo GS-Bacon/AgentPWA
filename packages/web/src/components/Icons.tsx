@@ -57,7 +57,7 @@ export const IconSidebar = (p: { size?: number }) => <Svg {...p}><rect x="3" y="
 export const IconPin = (p: { size?: number }) => <Svg {...p}><path d="M9 4h6M10 4v6l-3 4h10l-3-4V4M12 14v7" /></Svg>;
 
 
-/** AI のアイコン（Claude は橙の吹き出し、Codex は青の </>）。プロジェクトに固定された AI を示す */
+/** AI のアイコン（Claude は橙の吹き出し、Codex は青の </>）。プロジェクトの既定の AI や、セッションの AI を示す */
 export function AgentIcon({ agent, size = 14 }: { agent: 'claude' | 'codex'; size?: number }) {
   const color = agent === 'claude' ? 'var(--claude)' : 'var(--codex)';
   return (

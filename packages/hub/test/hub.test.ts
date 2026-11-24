@@ -98,11 +98,16 @@ describe('SessionManager', () => {
     store.close();
   });
 
-  it('AI はプロジェクトの設定で決まり、違う AI は指定できない', async () => {
+  it('AI を省くとプロジェクトの既定、指定すれば同じフォルダで別の AI も使える', async () => {
     const { manager, store } = setup();
     const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
     expect(s.agent).toBe('claude');
-    await expect(manager.create({ agent: 'claude', cwd: config.folders[1].path, permissionMode: 'ask' })).rejects.toThrow('codex 用');
+    // 既定が codex のフォルダでも claude のセッションを始められる
+    const t = await manager.create({ agent: 'claude', cwd: config.folders[1].path, permissionMode: 'ask' });
+    expect(t.agent).toBe('claude');
+    expect(t.cwd).toBe(config.folders[1].path);
+    // Driver の無い AI は起動しない
+    await expect(manager.create({ cwd: config.folders[1].path, permissionMode: 'ask' })).rejects.toThrow('codex の Driver がありません');
     store.close();
   });
 

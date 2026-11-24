@@ -182,9 +182,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (parentSessionId && !parent) throw new HttpError(400, '作成元のセッションが見つかりません');
     const folder = findAllowedFolder(this.config, req.cwd || parent?.cwd || '');
     if (!folder) throw new HttpError(403, 'このフォルダは許可リストに入っていません');
-    // AI はプロジェクト（作業フォルダ）ごとに設定ファイルで決めてある
-    const agent = folder.agent;
-    if (req.agent && req.agent !== agent) throw new HttpError(400, `このプロジェクトは ${agent} 用です`);
+    // 同じフォルダで Claude も Codex も使える。省いたときはプロジェクトの既定の AI（設定ファイルの folders の agent）
+    const agent = req.agent ?? folder.agent;
     const driver = this.drivers.get(agent);
     if (!driver) throw new HttpError(400, `${agent} の Driver がありません`);
     const permissionMode = req.permissionMode ?? folder.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE;
