@@ -112,6 +112,11 @@ export interface DirEntry {
   registered: boolean;
 }
 
+/** PUT /api/projects/order の本文。登録済みのプロジェクトのパスを、すべて新しい順に並べる */
+export interface ReorderProjectsRequest {
+  paths: string[];
+}
+
 /**
  * POST /api/projects の本文。作ったプロジェクトは設定ファイルの folders に書き足す。
  * - existing: 既存のフォルダ（path）をそのまま登録する

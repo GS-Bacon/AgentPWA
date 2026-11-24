@@ -5,11 +5,11 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { EFFORT_LEVELS, PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type Attachment, type EffortLevel, type PermissionMode, type SessionEvent, type SlashCommand, type UserAction } from '@agentpwa/shared';
-import type { CreateProjectRequest, CreateSessionRequest, FileInfo, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
+import type { CreateProjectRequest, ReorderProjectsRequest, CreateSessionRequest, FileInfo, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { checkOrigin, checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
 import { fileHeaders, resolveProjectFile, toInfo } from './files.ts';
-import { createProject, listDirs, type ProjectDeps } from './projects.ts';
+import { createProject, listDirs, reorderProjects, type ProjectDeps } from './projects.ts';
 import { HttpError, type SessionManager } from './sessions.ts';
 
 declare module 'fastify' {
@@ -158,6 +158,8 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   // プロジェクトの作成（ルートフォルダ projectRoots の下だけ。作ったものは設定ファイルの folders に書き足す）
   app.get<{ Querystring: { path?: string } }>('/api/fs/dirs', async (req) => listDirs(config, req.query.path || undefined));
   app.post('/api/projects', async (req) => createProject(projectDeps, (req.body ?? {}) as Partial<CreateProjectRequest>));
+  // プロジェクトの並び順（設定ファイルの folders の順）。登録済みのプロジェクトをすべて、新しい順で受け取る
+  app.put('/api/projects/order', async (req) => reorderProjects(projectDeps, (req.body as Partial<ReorderProjectsRequest> | undefined)?.paths));
 
   app.post('/api/sessions', async (req) => {
     const b = (req.body ?? {}) as Partial<CreateSessionRequest>;

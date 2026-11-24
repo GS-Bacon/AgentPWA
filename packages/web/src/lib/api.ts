@@ -8,6 +8,7 @@ import type {
   FileInfo,
   FolderEntry,
   HubInfo,
+  ReorderProjectsRequest,
   SessionSummary,
   UpdateSessionRequest,
 } from '@agentpwa/hub/api';
@@ -51,6 +52,8 @@ export const api = {
   dirs: (path?: string) => req<DirListing>('GET', `/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   /** プロジェクトを作る（Hub が設定ファイルの folders に書き足す） */
   createProject: (body: CreateProjectRequest) => req<FolderEntry>('POST', '/api/projects', body),
+  /** プロジェクトの並び順を変える（登録済みのプロジェクトのパスを、すべて新しい順で渡す） */
+  reorderProjects: (body: ReorderProjectsRequest) => req<FolderEntry[]>('PUT', '/api/projects/order', body),
   /** ファイルビュワー: プロジェクトのフォルダの下のファイルの情報（path は相対パスか絶対パス） */
   fileInfo: (id: string, path: string) => req<FileInfo>('GET', `/api/sessions/${id}/file-info?path=${encodeURIComponent(path)}`),
 };

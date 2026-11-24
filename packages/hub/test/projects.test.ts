@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig, type HubConfig } from '../src/config.ts';
-import { createProject, isInside, listDirs, validFolderName, type ProjectDeps } from '../src/projects.ts';
+import { createProject, isInside, listDirs, reorderProjects, validFolderName, type ProjectDeps } from '../src/projects.ts';
 
 let dir: string;
 let root: string;
@@ -126,6 +126,35 @@ describe('プロジェクトの作成', () => {
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     // 1件目は手で書いた項目（name なし）のまま残る
     expect(raw.folders.map((f: { name?: string }) => f.name)).toEqual([undefined, 'p1', 'p2']);
+  });
+});
+
+describe('プロジェクトの並べ替え', () => {
+  it('設定ファイルの folders の順を入れ替え、各項目は書かれたまま残す', async () => {
+    await createProject(deps(), { mode: 'new', path: root, folderName: 'p1', agent: 'codex' });
+    await createProject(deps(), { mode: 'new', path: root, folderName: 'p2', agent: 'claude' });
+    const [a, p1, p2] = config.folders.map((f) => f.path);
+    changed = 0;
+    const res = await reorderProjects(deps(), [p2, a + path.sep, p1]);
+    expect(res.map((f) => f.path)).toEqual([p2, a, p1]);
+    expect(config.folders.map((f) => f.path)).toEqual([p2, a, p1]);
+    expect(changed).toBe(1);
+    const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(raw.folders).toEqual([{ name: 'p2', path: p2, agent: 'claude' }, { path: a }, { name: 'p1', path: p1, agent: 'codex' }]);
+    expect(raw.allowedUsers).toEqual(['me@example.com']);
+    // 読み直しても同じ順になる
+    expect(loadConfig(configPath).config.folders.map((f) => f.path)).toEqual([p2, a, p1]);
+  });
+
+  it('過不足・重複・形の違う値は断る', async () => {
+    await createProject(deps(), { mode: 'new', path: root, folderName: 'p1', agent: 'claude' });
+    const [a, p1] = config.folders.map((f) => f.path);
+    await expect(reorderProjects(deps(), [a])).rejects.toThrow('一覧が変わっています');
+    await expect(reorderProjects(deps(), [a, a])).rejects.toThrow('一覧が変わっています');
+    await expect(reorderProjects(deps(), [p1, a, path.join(root, 'beta')])).rejects.toThrow('一覧が変わっています');
+    await expect(reorderProjects(deps(), 'x')).rejects.toThrow('paths');
+    await expect(reorderProjects(deps(), [1, 2])).rejects.toThrow('paths');
+    expect(config.folders.map((f) => f.path)).toEqual([a, p1]);
   });
 });
 

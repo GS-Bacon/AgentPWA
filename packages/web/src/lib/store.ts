@@ -269,6 +269,29 @@ export function askConfirm(opts: ConfirmOptions): Promise<boolean> {
   });
 }
 
+/**
+ * 登録済みのプロジェクト（path）を、folders の to 番目へ動かす。全端末で共有する（Hub が設定ファイルの順を入れ替える）。
+ * 画面にはすぐ反映し、Hub が断ったら元に戻す。
+ */
+export async function moveProject(path: string, to: number): Promise<void> {
+  const info = state.info;
+  if (!info) return;
+  const from = info.folders.findIndex((f) => f.path === path);
+  const target = Math.max(0, Math.min(to, info.folders.length - 1));
+  if (from < 0 || from === target) return;
+  const folders = [...info.folders];
+  const [moved] = folders.splice(from, 1);
+  folders.splice(target, 0, moved);
+  set({ info: { ...info, folders } });
+  try {
+    await api.reorderProjects({ paths: folders.map((f) => f.path) });
+  } catch (e) {
+    // その間に Hub から新しい info が届いていれば、そちらを残す
+    if (state.info?.folders === folders) set({ info: { ...state.info, folders: info.folders } });
+    showToast((e as Error).message);
+  }
+}
+
 /** 操作を実行し、失敗したら通知を出す。 */
 export async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
   try {

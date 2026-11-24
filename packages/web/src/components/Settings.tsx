@@ -1,7 +1,7 @@
 // 設定（Hub の状態、認証、プロジェクト、表示）
 import { useState } from 'react';
 import { DEFAULT_PERMISSION_MODE, type AgentKind } from '@agentpwa/shared';
-import { useStore } from '../lib/store.ts';
+import { moveProject, useStore } from '../lib/store.ts';
 import { resetLayout } from '../lib/layout.ts';
 import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL } from '../lib/format.ts';
 import { UsageBars } from './common.tsx';
@@ -68,10 +68,19 @@ export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
             <IconPlus size={14} /> 新しいプロジェクト
           </button>
         </div>
-        {(info?.folders ?? []).map((f) => (
+        {(info?.folders ?? []).map((f, i, all) => (
           <Row key={f.path} label={f.name}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: AGENT_COLOR[f.agent], fontSize: 13 }}>
               <AgentIcon agent={f.agent} /> {AGENT_LABEL[f.agent]}
+              {/* 並び順（一覧の順。全端末で共有する） */}
+              <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                <button className="btn btn-icon-sm" aria-label={`${f.name} を上へ`} title="上へ" disabled={i === 0} onClick={() => moveProject(f.path, i - 1)}>
+                  ↑
+                </button>
+                <button className="btn btn-icon-sm" aria-label={`${f.name} を下へ`} title="下へ" disabled={i === all.length - 1} onClick={() => moveProject(f.path, i + 1)}>
+                  ↓
+                </button>
+              </span>
             </span>
             <span className="mono" style={{ fontSize: 12 }}>{f.path}</span>
             <span className="muted" style={{ display: 'block', fontSize: 12 }}>
@@ -89,7 +98,7 @@ export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
           ) : (
             '（未設定のため、いまは画面から作れません）'
           )}
-          。作ったプロジェクトは設定ファイルの folders に書き足されます。変更・削除は、設定ファイルの folders を編集して保存します（Hub が自動で読み直します）。
+          。作ったプロジェクトは設定ファイルの folders に書き足されます。並び順は ↑↓（iPad / Web では一覧のプロジェクト名のドラッグでも）で変えられ、全端末で共有されます。そのほかの変更・削除は、設定ファイルの folders を編集して保存します（Hub が自動で読み直します）。
         </p>
       </Section>
       <Section title="表示">

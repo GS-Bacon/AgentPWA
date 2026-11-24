@@ -168,7 +168,7 @@ async function doCreate(deps: ProjectDeps, b: Partial<CreateProjectRequest>): Pr
   return entry;
 }
 
-/** 設定ファイルの folders に1件書き足す。ほかの項目はそのまま残す。一時ファイルに書いてから置き換える */
+/** 設定ファイルの folders に1件書き足す。ほかの項目はそのまま残す */
 export async function appendFolderToConfig(configPath: string, entry: FolderEntry): Promise<void> {
   const raw = JSON.parse(await fs.promises.readFile(configPath, 'utf8')) as Record<string, unknown>;
   const folders = Array.isArray(raw.folders) ? raw.folders : [];
@@ -176,6 +176,51 @@ export async function appendFolderToConfig(configPath: string, entry: FolderEntr
   if (entry.allowFullAuto) item.allowFullAuto = true;
   if (entry.defaultPermissionMode && entry.defaultPermissionMode !== DEFAULT_PERMISSION_MODE) item.defaultPermissionMode = entry.defaultPermissionMode;
   raw.folders = [...folders, item];
+  await writeConfig(configPath, raw);
+}
+
+/**
+ * プロジェクトの並び順を変える（設定ファイルの folders の順を入れ替える）。
+ * paths には登録済みのプロジェクトをすべて、新しい順に並べて渡す。過不足があれば（別の端末で増減したときなど）409 で断る。
+ */
+export function reorderProjects(deps: ProjectDeps, paths: unknown): Promise<FolderEntry[]> {
+  const run = queue.then(() => doReorder(deps, paths));
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+/** 並べ替えでパスを突き合わせるときの形（末尾の区切りなどをそろえる） */
+const pathKey = (p: string) => norm(path.resolve(p));
+
+async function doReorder(deps: ProjectDeps, paths: unknown): Promise<FolderEntry[]> {
+  const { config } = deps;
+  if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'paths はフォルダのパスの配列にしてください');
+  const keys = paths.map((p: string) => pathKey(p));
+  const current = new Map(config.folders.map((f) => [pathKey(f.path), f]));
+  if (new Set(keys).size !== keys.length || keys.length !== current.size || !keys.every((k) => current.has(k))) {
+    throw new HttpError(409, 'プロジェクトの一覧が変わっています。画面を読み直してから、もう一度並べ替えてください');
+  }
+  const raw = JSON.parse(await fs.promises.readFile(deps.configPath, 'utf8')) as Record<string, unknown>;
+  const items: unknown[] = Array.isArray(raw.folders) ? raw.folders : [];
+  const rank = new Map(keys.map((k, i) => [k, i]));
+  const rankOf = (item: unknown) => {
+    const p = (item as { path?: unknown } | null)?.path;
+    return typeof p === 'string' && path.isAbsolute(p) ? (rank.get(pathKey(p)) ?? keys.length) : keys.length;
+  };
+  // 設定ファイルの各項目は書かれたまま（既定値を書き足さない）で、順だけ入れ替える。並べ替えは安定
+  raw.folders = items
+    .map((item, i) => ({ item, i }))
+    .sort((a, b) => rankOf(a.item) - rankOf(b.item) || a.i - b.i)
+    .map((x) => x.item);
+  await writeConfig(deps.configPath, raw);
+  // 監視による読み直しを待たずに反映する
+  config.folders = keys.map((k) => current.get(k)!);
+  deps.onChanged();
+  return config.folders;
+}
+
+/** 設定ファイルを書き換える。一時ファイルに書いてから置き換える */
+async function writeConfig(configPath: string, raw: Record<string, unknown>): Promise<void> {
   const tmp = `${configPath}.${process.pid}.tmp`;
   await fs.promises.writeFile(tmp, JSON.stringify(raw, null, 2) + '\n');
   await fs.promises.rename(tmp, configPath);

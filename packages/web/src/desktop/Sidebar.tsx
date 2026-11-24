@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import type { AgentKind } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
-import { getState, useStore, waitingCount } from '../lib/store.ts';
+import { getState, moveProject, useStore, waitingCount } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, elapsed } from '../lib/format.ts';
 import { openSessionInNewPane, type LayoutState } from '../lib/layout.ts';
 import { archivedSessions, buildProjects, type Project } from '../lib/projects.ts';
@@ -12,6 +12,21 @@ import { AutoWarn, ConnState, ContextMenu, sessionMenuItems, StatusLabel, UsageB
 import { AgentIcon, IconGear, IconPlus } from '../components/Icons.tsx';
 
 export const DRAG_TYPE = 'application/x-agentpwa-session';
+/** プロジェクトの並べ替え用（ペインへのドロップとは別の種類にする） */
+const PROJECT_DRAG_TYPE = 'application/x-agentpwa-project';
+
+/**
+ * ドラッグしたプロジェクト（from）を、target の前か後ろへ動かす。並び順は設定ファイルの folders の順（全端末で共有）。
+ */
+function dropProject(from: string, target: string, after: boolean): void {
+  const folders = getState().info?.folders ?? [];
+  const i = folders.findIndex((f) => f.path === from);
+  let to = folders.findIndex((f) => f.path === target);
+  if (i < 0 || to < 0 || from === target) return;
+  if (after) to++;
+  if (i < to) to--;
+  void moveProject(from, to);
+}
 export const isWaiting = (id: string) => (getState().sessions[id]?.rank ?? 9) <= 2;
 
 type Update = (fn: (s: LayoutState) => LayoutState) => void;
@@ -104,14 +119,45 @@ function ProjectGroup({
 }) {
   const paneNo = new Map(layout.panes.map((x, i) => [x.sessionId, i + 1]));
   const focusedSession = layout.panes.find((x) => x.id === layout.focused)?.sessionId;
+  // 並べ替えでドラッグ中のプロジェクトが、この見出しの上半分（before）か下半分（after）にあるか
+  const [dropAt, setDropAt] = useState<'before' | 'after' | null>(null);
+  const accepts = (e: React.DragEvent) => p.registered && e.dataTransfer.types.includes(PROJECT_DRAG_TYPE);
   return (
     <div>
       <div
+        draggable={p.registered}
+        onDragStart={(e) => {
+          e.dataTransfer.setData(PROJECT_DRAG_TYPE, p.path);
+          e.dataTransfer.effectAllowed = 'move';
+        }}
+        onDragOver={(e) => {
+          if (!accepts(e)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const r = e.currentTarget.getBoundingClientRect();
+          setDropAt(e.clientY < r.top + r.height / 2 ? 'before' : 'after');
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null);
+        }}
+        onDrop={(e) => {
+          if (!accepts(e)) return;
+          e.preventDefault();
+          const from = e.dataTransfer.getData(PROJECT_DRAG_TYPE);
+          const r = e.currentTarget.getBoundingClientRect();
+          setDropAt(null);
+          if (from) dropProject(from, p.path, e.clientY >= r.top + r.height / 2);
+        }}
+        onDragEnd={() => setDropAt(null)}
+        title={p.registered ? 'ドラッグで並べ替え' : undefined}
         style={{
           display: 'flex', alignItems: 'center', gap: 6, padding: '0 6px 0 8px', minHeight: 36, borderBottom: '1px solid var(--border)',
           background: 'var(--bg-muted)', position: 'sticky', top: 0, zIndex: 1,
         }}
       >
+        {dropAt && (
+          <span aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, height: 2, background: 'var(--link)', pointerEvents: 'none', ...(dropAt === 'before' ? { top: -1 } : { bottom: -1 }) }} />
+        )}
         <button
           onClick={toggle}
           aria-expanded={!collapsed}
