@@ -38,6 +38,10 @@ export const IconFile = (p: { size?: number }) => <Svg {...p}><path d="M14 3H6a1
 export const IconChevron = (p: { size?: number }) => <Svg {...p}><path d="M9 6l6 6-6 6" /></Svg>;
 export const IconStop = (p: { size?: number }) => <Svg {...p} fill><rect x="6" y="6" width="12" height="12" /></Svg>;
 export const IconMaximize = (p: { size?: number }) => <Svg {...p}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></Svg>;
+export const IconCopy = (p: { size?: number }) => (
+  <Svg {...p}><rect x="9" y="9" width="12" height="12" rx="1" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></Svg>
+);
+export const IconCheck = (p: { size?: number }) => <Svg {...p}><path d="M5 12l5 5 9-10" /></Svg>;
 export const IconSidebar = (p: { size?: number }) => <Svg {...p}><rect x="3" y="4" width="18" height="16" /><path d="M9 4v16" /></Svg>;
 
 

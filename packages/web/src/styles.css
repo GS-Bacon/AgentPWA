@@ -160,6 +160,15 @@ kbd {
 .msg-assistant code { font: 12.5px var(--mono); background: var(--bg-inset); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .msg-assistant pre { background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; overflow: auto; }
 .msg-assistant pre code { border: none; padding: 0; background: none; }
+.code-block { position: relative; margin: 0 0 0.6em; }
+.code-block pre { margin: 0; padding-right: 40px; }
+.code-copy {
+  position: absolute; top: 5px; right: 5px; width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--btn-bg); color: var(--fg-muted); cursor: pointer;
+}
+.code-copy:hover { background: var(--btn-bg-hover); color: var(--fg); }
+.code-copy.copied { color: var(--running); }
 .msg-assistant table { border-collapse: collapse; margin: 0 0 0.6em; display: block; overflow-x: auto; }
 .msg-assistant th, .msg-assistant td { border: 1px solid var(--border); padding: 4px 8px; }
 .msg-assistant blockquote { margin: 0 0 0.6em; padding-left: 10px; border-left: 2px solid var(--border); color: var(--fg-muted); }
