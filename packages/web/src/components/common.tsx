@@ -225,21 +225,50 @@ export function PinMark({ s }: { s: Pick<SessionSummary, 'pinned'> }) {
 
 // ---- その他 ----
 
+/** バーのメモリの数。5時間枠は1時間ごと（5）、週間枠は1日ごと（7）。分からなければ付けない。 */
+function usageTicks(u: UsageInfo): number {
+  const m = u.windowMinutes;
+  if (m !== undefined) {
+    if (m >= 2 * 24 * 60 && m % (24 * 60) === 0) return m / (24 * 60);
+    if (m >= 120 && m % 60 === 0) return m / 60;
+    return 0;
+  }
+  // windowMinutes を送らない Driver 向けに、ラベルから推し量る
+  if (/週|week/i.test(u.label)) return 7;
+  if (/5s*時間|5h|five/i.test(u.label)) return 5;
+  return 0;
+}
+
+/** 使用率に応じた色。0% の青（Primer の accent に近い色相）から、100% の赤へ色相を回す。 */
+function usageColor(percent: number): string {
+  const t = Math.max(0, Math.min(1, percent / 100));
+  const hue = 212 * (1 - t);
+  return `hsl(${hue.toFixed(0)} 85% 60%)`;
+}
+
 export function UsageBars({ usage }: { usage: UsageInfo[] }) {
   if (usage.length === 0) return null;
   return (
     <div className="usage">
-      {usage.map((u) => (
-        <div key={u.label} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <div className="usage-row">
-            <span>{u.label}</span>
-            <span style={{ color: 'var(--fg)' }}>{u.percent !== undefined ? `${u.percent}%` : '—'}</span>
+      {usage.map((u) => {
+        const p = u.percent ?? 0;
+        const ticks = usageTicks(u);
+        const color = usageColor(p);
+        return (
+          <div key={u.label} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div className="usage-row">
+              <span>{u.label}</span>
+              <span style={{ color: u.percent !== undefined ? color : 'var(--fg)' }}>{u.percent !== undefined ? `${u.percent}%` : '—'}</span>
+            </div>
+            <div className="usage-bar">
+              <div style={{ width: `${Math.min(100, p)}%`, background: color }} />
+              {Array.from({ length: Math.max(0, ticks - 1) }, (_, i) => (
+                <span key={i} className="usage-tick" style={{ left: `${((i + 1) * 100) / ticks}%` }} />
+              ))}
+            </div>
           </div>
-          <div className={`usage-bar${(u.percent ?? 0) >= 80 ? ' hi' : ''}`}>
-            <div style={{ width: `${Math.min(100, u.percent ?? 0)}%` }} />
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

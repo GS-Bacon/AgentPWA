@@ -164,8 +164,11 @@ export class StreamMapper {
     const w = info?.unifiedWindows;
     if (!w) return [];
     const out: DriverEvent[] = [];
-    if (w.five_hour) out.push({ type: 'usage', label: 'セッション枠（5時間）', percent: pct(w.five_hour.utilization), resetsAt: epochToIso(w.five_hour.resetsAt) });
-    if (w.seven_day) out.push({ type: 'usage', label: '週間', percent: pct(w.seven_day.utilization), resetsAt: epochToIso(w.seven_day.resetsAt) });
+    const win = (x: Json, label: string, windowMinutes: number): DriverEvent => ({ type: 'usage', label, percent: pct(x.utilization), resetsAt: epochToIso(x.resetsAt), windowMinutes });
+    if (w.five_hour) out.push(win(w.five_hour, 'セッション枠（5時間）', 300));
+    if (w.seven_day) out.push(win(w.seven_day, '週間', 7 * 24 * 60));
+    // CLI が「Fable limit」と呼ぶ週間枠。その枠がある契約のときだけ届く。
+    if (w.seven_day_overage_included) out.push(win(w.seven_day_overage_included, 'Fable（週間）', 7 * 24 * 60));
     return out;
   }
 }

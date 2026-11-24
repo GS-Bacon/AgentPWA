@@ -276,9 +276,10 @@ kbd {
 /* ---- 使用量 ---- */
 .usage { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--fg-muted); }
 .usage-row { display: flex; justify-content: space-between; }
-.usage-bar { height: 4px; background: var(--btn-bg); }
-.usage-bar > div { height: 100%; background: var(--fg-muted); }
-.usage-bar.hi > div { background: var(--attention); }
+.usage-bar { position: relative; height: 6px; background: var(--btn-bg); }
+.usage-bar > div { height: 100%; }
+/* 1時間・1日ごとのメモリ。地の色で塗って、バーを等分に区切って見せる */
+.usage-tick { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -0.5px; background: var(--bg); }
 
 /* ---- フォーム ---- */
 .form-section { display: flex; flex-direction: column; }

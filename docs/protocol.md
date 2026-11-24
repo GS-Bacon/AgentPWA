@@ -118,7 +118,7 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | モードの通知 | stream-json の `system/init` と `system/status` の `permissionMode` を、上の対応の逆で `permission_mode` にして送る（計画モードの終了など、CLI 自身による変更もここで届く） |
 | 履歴の削除（`deleteHistory`） | `~/.claude/projects/<cwd の英数字以外を - に置き換えた名前>/<session_id>.jsonl` と、同名のフォルダ（あれば）を消す。`claude --resume` の一覧からも消える |
 | 認証の確認 | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` / `CLAUDE_CODE_USE_FOUNDRY` があれば `api_key`。無ければ `claude auth status`（JSON）の `authMethod` を見て、`claude.ai` / `oauth_token` は `subscription`、`api_key` / `api_key_helper` / `third_party` は `api_key`。起動後も system/init の `apiKeySource` が `none` 以外なら、エラー（fatal）を出して止める |
-| 使用量 | `rate_limit_event` の `unifiedWindows.five_hour` / `seven_day` の utilization を `usage`（「セッション枠（5時間）」「週間」）にする |
+| 使用量 | `rate_limit_event` の `unifiedWindows.five_hour` / `seven_day` / `seven_day_overage_included` の utilization を `usage`（「セッション枠（5時間）」「週間」「Fable（週間）」）にする。`seven_day_overage_included` は CLI が「Fable limit」と呼ぶ週間枠で、その枠がある契約のときだけ届く。`windowMinutes` はそれぞれ 300 / 10080 / 10080 |
 
 ### Codex への依頼（権限モード）
 
@@ -160,6 +160,10 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 
 - `deleteHistory` を実装するか決めて、対応表に書いてください。app-server にスレッドを消す（またはアーカイブする）メソッドがあれば使い、なければ実装しなくてよい（Hub の記録だけ消える）。
 
+### Codex への依頼（使用量の枠の長さ）
+
+- （任意、v9）`usage` イベントに `windowMinutes`（枠の長さ（分）。5時間枠は 300、週間枠は 10080）を入れてください。app-server のレート制限に枠の長さ（`windowDurationMins` など）があればそのまま使えます。入っていれば、Web のバーに1時間ごと・1日ごとのメモリが付きます。
+
 ### Codex（`codex app-server`）— Codex 担当
 
 | プロトコル | Codex app-server 側 |
@@ -183,3 +187,4 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 | 2026-11-24 | 6 | `model` イベントに `resolvedModel` / `resolvedEffort`（既定やエイリアスを解決した実際の値。省略可）を追加（3.2）。Codex 側の対応は任意 | Claude |
 | 2026-11-24 | 7 | 添付ファイル（`send` の `attachments`、`message` の `attachments`、`AgentDriver.supportsAttachments`）と、スラッシュコマンドの一覧（`AgentDriver.listCommands`、`SlashCommand`）を追加（3.3。アーカイブと削除は 3.4 に移動）。プロジェクトに既定の権限モードが無いときのモードを `ask` から `auto` に変更（`DEFAULT_PERMISSION_MODE`） | Claude |
 | 2026-11-24 | 8 | `question` に `questions`（問いごとの見出し・選択肢と説明・複数選択。`QuestionItem` / `QuestionOption`）を、`answer` に `answers`（問いごとの回答）を追加（3.4。アーカイブと削除は 3.5 に移動）。どちらも省略可で、古い形（`prompt` / `options` / `text`）も使える。Codex 側の対応は任意 | Claude |
+| 2026-11-24 | 9 | `usage` に `windowMinutes`（枠の長さ（分）。省略可）を追加。UI がバーのメモリ（5時間枠は5等分、週間枠は7等分）に使う。Codex 側の対応は任意 | Claude |

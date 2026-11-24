@@ -156,10 +156,11 @@ describe('StreamMapper', () => {
 
   it('rate_limit_event を usage にする', () => {
     const m = new StreamMapper();
-    const r = m.map({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.16, resetsAt: 1795497600 }, seven_day: { utilization: 0.04, resetsAt: 1795932000 } } } });
+    const r = m.map({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.16, resetsAt: 1795497600 }, seven_day: { utilization: 0.04, resetsAt: 1795932000 }, seven_day_overage_included: { utilization: 0.37, resetsAt: 1795932000 } } } });
     expect(r.events).toEqual([
-      { type: 'usage', label: 'セッション枠（5時間）', percent: 16, resetsAt: new Date(1795497600 * 1000).toISOString() },
-      { type: 'usage', label: '週間', percent: 4, resetsAt: new Date(1795932000 * 1000).toISOString() },
+      { type: 'usage', label: 'セッション枠（5時間）', percent: 16, resetsAt: new Date(1795497600 * 1000).toISOString(), windowMinutes: 300 },
+      { type: 'usage', label: '週間', percent: 4, resetsAt: new Date(1795932000 * 1000).toISOString(), windowMinutes: 10080 },
+      { type: 'usage', label: 'Fable（週間）', percent: 37, resetsAt: new Date(1795932000 * 1000).toISOString(), windowMinutes: 10080 },
     ]);
   });
 });

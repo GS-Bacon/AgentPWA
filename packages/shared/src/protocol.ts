@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -219,7 +219,17 @@ export type DriverEvent =
       resolvedModel?: string;
       resolvedEffort?: EffortLevel;
     }
-  | { type: 'usage'; label: string; percent?: number; resetsAt?: string }
+  | {
+      type: 'usage';
+      label: string;
+      percent?: number;
+      resetsAt?: string;
+      /**
+       * 枠の長さ（分）。5時間枠は 300、週間枠は 10080。
+       * UI はこれでバーのメモリの数を決める（5時間枠は1時間ごとの5等分、週間枠は1日ごとの7等分）。
+       */
+      windowMinutes?: number;
+    }
   | { type: 'error'; message: string; fatal: boolean };
 
 /** Hub が保存・配信するときの形。 */
