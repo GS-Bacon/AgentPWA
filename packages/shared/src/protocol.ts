@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
