@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -36,11 +36,12 @@ export const USER_TURN_STATUSES: readonly SessionStatus[] = ['waiting_approval',
 export type PermissionMode =
   | 'ask' // 毎回確認（既定）
   | 'auto_edit' // ファイル編集は自動、コマンドは確認
+  | 'auto' // 自動承認。エージェント側の安全判定が許可を決め、危険と判定した操作だけ止める
   | 'full_auto' // すべて自動で許可（確認しない）。Hub がフォルダごとに許可した場合だけ使える
   | 'plan'; // 計画のみ（変更しない）
 
 /** UI での表示順（切り替えメニューの並び）。 */
-export const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto_edit', 'full_auto', 'plan'];
+export const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto_edit', 'auto', 'full_auto', 'plan'];
 
 export interface StartOptions {
   /** Hub が採番する ID。Driver はこれをそのまま使う。 */
@@ -151,6 +152,12 @@ export interface AgentDriver {
   checkAuth(): Promise<AuthCheck>;
   /** セッションを開始（または resumeToken で再開）する。emit は何度呼んでもよい。 */
   start(opts: StartOptions, emit: (event: DriverEvent) => void): Promise<DriverSession>;
+  /**
+   * 任意。Hub でセッションを削除したときに、エージェント側に残る履歴も消す。
+   * Hub はセッションを止めてから呼ぶ。実装しない Driver では、エージェント側の履歴は残る。
+   * アーカイブは Hub だけで扱うので、Driver には何も届かない。
+   */
+  deleteHistory?(target: { cwd: string; resumeToken: string }): Promise<void>;
 }
 
 export interface DriverSession {
