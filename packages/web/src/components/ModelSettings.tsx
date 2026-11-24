@@ -5,7 +5,7 @@ import type { EffortLevel } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { run } from '../lib/store.ts';
-import { EFFORTS, EFFORT_LABEL, MODELS, aliasModelLabel, defaultEffortLabel, defaultModelLabel, knownDefault, modelSummary, rememberDefault } from '../lib/models.ts';
+import { EFFORTS, EFFORT_LABEL, MODELS, aliasModelLabel, defaultEffortLabel, defaultModelLabel, knownDefault, modelSummary, rememberChoice, rememberDefault } from '../lib/models.ts';
 import { useDismiss } from './common.tsx';
 
 /** 反映を待つ時間。これを過ぎても model が来なければ（失敗）、表示を元に戻す */
@@ -53,6 +53,8 @@ export function ModelButton({ session: s, disabled }: { session: SessionSummary;
     setPending(next);
     const ok = await run(() => api.action(s.id, { type: 'set_model', ...patch }));
     if (!ok) setPending(null);
+    // 次にこのプロジェクトで始めるセッションも、これで始まるようにする
+    else rememberChoice(s.cwd, s.agent, next);
   };
 
   const label = modelSummary(s.agent, shown.model, shown.effort, resolved);

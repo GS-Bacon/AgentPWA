@@ -87,6 +87,60 @@ export function rememberDefault(agent: AgentKind, s: { model?: string; effort?: 
   }
 }
 
+// ---- 前回選んだモデルとエフォート ----
+// 新規セッションの画面やペインのメニューで選んだものを、プロジェクトごと（とエージェントごと）にこの端末に覚える。
+// プロジェクト横の＋で始めるセッションや、新規セッションの画面の初期値に使う。
+
+const CHOICE_KEY = 'agentpwa.lastChoice.v1';
+/** 以前の新規セッションの画面の覚え書き（プロジェクトごとの覚え書きがないときの予備） */
+const OLD_LAST_KEY = 'agentpwa.newSession.v1';
+export type Choice = { model?: string; effort?: EffortLevel };
+type Choices = { byCwd?: Record<string, Choice>; byAgent?: Partial<Record<AgentKind, Choice>> };
+
+function loadChoices(): Choices {
+  try {
+    return JSON.parse(localStorage.getItem(CHOICE_KEY) ?? '{}') ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** 選べないもの（エージェントが違う・一覧から消えた）を外す */
+function validChoice(agent: AgentKind, c: Choice | undefined): Choice {
+  if (!c) return {};
+  return {
+    model: c.model && MODELS[agent].some((m) => m.value === c.model) ? c.model : undefined,
+    effort: c.effort && EFFORTS[agent].includes(c.effort) ? c.effort : undefined,
+  };
+}
+
+/** そのプロジェクトで前回選んだモデルとエフォート。なければ同じエージェントで前回選んだもの */
+export function lastChoice(cwd: string, agent: AgentKind): Choice {
+  const all = loadChoices();
+  const own = all.byCwd?.[cwd.toLowerCase()];
+  if (own) return validChoice(agent, own);
+  const byAgent = all.byAgent?.[agent];
+  if (byAgent) return validChoice(agent, byAgent);
+  try {
+    return validChoice(agent, JSON.parse(localStorage.getItem(OLD_LAST_KEY) ?? '{}'));
+  } catch {
+    return {};
+  }
+}
+
+/** 選んだモデルとエフォートを覚える（undefined は「既定」） */
+export function rememberChoice(cwd: string, agent: AgentKind, c: Choice): void {
+  const all = loadChoices();
+  const v: Choice = { model: c.model || undefined, effort: c.effort };
+  all.byCwd = { ...all.byCwd, [cwd.toLowerCase()]: v };
+  all.byAgent = { ...all.byAgent, [agent]: v };
+  try {
+    localStorage.setItem(CHOICE_KEY, JSON.stringify(all));
+  } catch {
+    /* 覚えられなくても既定で始まるだけ */
+  }
+}
+
 /** 「既定」の選択肢の表示名（例: 「既定（Opus 5.5）」） */
 export function defaultModelLabel(resolved: string | undefined): string {
   return resolved ? `既定（${resolvedModelLabel(resolved)}）` : '既定';

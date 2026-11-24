@@ -32,7 +32,7 @@ import {
 import { decide, useNow } from '../components/Requests.tsx';
 import { AutoWarn, ConnState, SessionMenu, StatusLabel } from '../components/common.tsx';
 import { SessionView } from '../components/SessionView.tsx';
-import { NewSessionForm } from '../components/NewSession.tsx';
+import { NewSessionForm, startSessionIn } from '../components/NewSession.tsx';
 import { Settings } from '../components/Settings.tsx';
 import { FileViewer } from '../components/FileViewer.tsx';
 import { onOpenFile } from '../lib/viewer.ts';
@@ -504,6 +504,33 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
     };
   }, [layout, nextUnread, nextAsking, update]);
 
+  // 新しいセッションを、フォーカス中の空のペインか新しいペインで開く
+  const showCreated = (id: string) => {
+    setMaximized(null);
+    update((l) => {
+      const target = l.panes.find((p) => p.id === l.focused);
+      return target && isEmptyPane(target) ? setPaneSession(l, target.id, id) : addPane(l, id);
+    });
+  };
+
+  // プロジェクト横の＋: 画面を挟まずに、そのプロジェクトで（前回のモデルとエフォートで）始めてペインで開く
+  const starting = useRef(false);
+  const startIn = async (cwd: string) => {
+    const folder = getState().info?.folders.find((f) => f.path === cwd);
+    if (!folder) {
+      setNewSession({ cwd });
+      return;
+    }
+    if (starting.current) return;
+    starting.current = true;
+    try {
+      const s = await startSessionIn(folder);
+      if (s) showCreated(s.id);
+    } finally {
+      starting.current = false;
+    }
+  };
+
   const renderPane = (p: Pane, i: number) => <PaneView key={p.id} pane={p} index={i} layout={layout} update={update} maximized={maximized === p.id} setMaximized={setMaximized} />;
 
   const hint = `${layout.panes.length} ペイン · 見出しをドラッグして移動・分割 · 境界のダブルクリックで均等`;
@@ -541,7 +568,7 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
               // プロジェクトの指定がなければ、フォーカス中のペインのセッションのプロジェクトにする
               const sid = layout.panes.find((p) => p.id === layout.focused)?.sessionId;
               setNewSession({ cwd: cwd ?? (sid ? sessions[sid]?.cwd : undefined) });
-            }} archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} onSettings={() => setSettings(true)} />
+            }} onStartIn={(cwd) => void startIn(cwd)} archivedOpen={archivedOpen} setArchivedOpen={setArchivedOpen} onSettings={() => setSettings(true)} />
         ) : (
           <Rail layout={layout} update={update} onSettings={() => setSettings(true)} />
         )}
@@ -559,10 +586,7 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
           onClose={() => setNewSession(null)}
           onCreated={(s) => {
             setNewSession(null);
-            update((l) => {
-              const target = l.panes.find((p) => p.id === l.focused);
-              return target && isEmptyPane(target) ? setPaneSession(l, target.id, s.id) : addPane(l, s.id);
-            });
+            showCreated(s.id);
           }}
         />
       )}

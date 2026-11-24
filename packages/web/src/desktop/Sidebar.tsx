@@ -203,13 +203,17 @@ export function Sidebar({
   layout,
   update,
   onNew,
+  onStartIn,
   archivedOpen,
   setArchivedOpen,
   onSettings,
 }: {
   layout: LayoutState;
   update: Update;
+  /** 「＋ 新規」: 新しいセッションの画面を開く */
   onNew: (cwd?: string) => void;
+  /** プロジェクト横の＋: 画面を挟まずにそのプロジェクトでセッションを始める */
+  onStartIn: (cwd: string) => void;
   archivedOpen: boolean;
   setArchivedOpen: (v: boolean) => void;
   onSettings: () => void;
@@ -275,7 +279,7 @@ export function Sidebar({
             p={p}
             collapsed={!query && collapsed.has(p.key)}
             toggle={() => update((l) => ({ ...l, collapsed: l.collapsed.includes(p.key) ? l.collapsed.filter((k) => k !== p.key) : [...l.collapsed, p.key] }))}
-            onNew={(cwd) => onNew(cwd)}
+            onNew={onStartIn}
             layout={layout}
             update={update}
             now={now}

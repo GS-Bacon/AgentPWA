@@ -7,17 +7,37 @@ import { api } from '../lib/api.ts';
 import { showToast, useStore } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL, MODE_NOTE } from '../lib/format.ts';
 import { confirmFullAuto } from '../lib/sessionActions.ts';
-import { EFFORTS, EFFORT_LABEL, MODELS, defaultEffortLabel, defaultModelLabel, knownDefault } from '../lib/models.ts';
+import { EFFORTS, EFFORT_LABEL, MODELS, defaultEffortLabel, defaultModelLabel, knownDefault, lastChoice, rememberChoice } from '../lib/models.ts';
 import { AgentIcon, IconClose, IconPlus } from './Icons.tsx';
 import { NewProjectForm } from './NewProject.tsx';
 
 const LAST_KEY = 'agentpwa.newSession.v1';
 
-function loadLast(): { cwd?: string; model?: string; effort?: EffortLevel } {
+function loadLast(): { cwd?: string } {
   try {
     return JSON.parse(localStorage.getItem(LAST_KEY) ?? '{}');
   } catch {
     return {};
+  }
+}
+
+/**
+ * 画面を挟まずに、そのプロジェクトでセッションを始める（プロジェクト横の＋）。
+ * モデルとエフォートはそのプロジェクトで前回選んだもの、権限モードはプロジェクトの既定。失敗したらお知らせを出して null
+ */
+export async function startSessionIn(folder: FolderEntry): Promise<SessionSummary | null> {
+  const c = lastChoice(folder.path, folder.agent);
+  try {
+    const s = await api.create({ cwd: folder.path, model: c.model, effort: c.effort, permissionMode: folder.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE });
+    try {
+      localStorage.setItem(LAST_KEY, JSON.stringify({ cwd: folder.path }));
+    } catch {
+      /* noop */
+    }
+    return s;
+  } catch (e) {
+    showToast((e as Error).message);
+    return null;
   }
 }
 
@@ -49,14 +69,17 @@ export function NewSessionForm({
   const allowFullAuto = folder?.allowFullAuto === true;
   // 権限モードの既定はプロジェクトの設定（defaultPermissionMode）。なければ「毎回確認」
   const defaultMode = (p: string): PermissionMode => folders.find((f) => f.path === p)?.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE;
-  const [model, setModel] = useState(agent === 'claude' ? last.model ?? '' : '');
-  // エフォートは空文字が「既定」
-  const [effort, setEffort] = useState<EffortLevel | ''>(last.effort && EFFORTS[agent].includes(last.effort) ? last.effort : '');
+  // モデルとエフォートは、そのプロジェクトで前回選んだもの（空文字が「既定」）
+  const [model, setModel] = useState(() => (cwd ? lastChoice(cwd, agent).model ?? '' : ''));
+  const [effort, setEffort] = useState<EffortLevel | ''>(() => (cwd ? lastChoice(cwd, agent).effort ?? '' : ''));
+  const pickChoice = (p: string, a: AgentKind) => {
+    const c = lastChoice(p, a);
+    setModel(c.model ?? '');
+    setEffort(c.effort ?? '');
+  };
   const setCwd = (p: string) => {
     setCwdState(p);
-    const a = folders.find((f) => f.path === p)?.agent ?? 'claude';
-    if (!MODELS[a].some((m) => m.value === model)) setModel('');
-    if (effort && !EFFORTS[a].includes(effort)) setEffort('');
+    pickChoice(p, folders.find((f) => f.path === p)?.agent ?? 'claude');
     setMode(defaultMode(p));
   };
   const [mode, setMode] = useState<PermissionMode>(() => defaultMode(cwd));
@@ -64,7 +87,7 @@ export function NewSessionForm({
     setCreated(f);
     setAddingProject(false);
     setCwdState(f.path);
-    if (!MODELS[f.agent].some((m) => m.value === model)) setModel('');
+    pickChoice(f.path, f.agent);
     setMode(f.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE);
   };
   const pickMode = async (m: PermissionMode) => {
@@ -85,10 +108,11 @@ export function NewSessionForm({
     try {
       const s = await api.create({ cwd, model: model || undefined, effort: effort || undefined, permissionMode: mode, prompt: prompt.trim() || undefined });
       try {
-        localStorage.setItem(LAST_KEY, JSON.stringify({ cwd, model, effort: effort || undefined }));
+        localStorage.setItem(LAST_KEY, JSON.stringify({ cwd }));
       } catch {
         /* noop */
       }
+      rememberChoice(cwd, agent, { model: model || undefined, effort: effort || undefined });
       onCreated(s);
     } catch (e) {
       showToast((e as Error).message);
