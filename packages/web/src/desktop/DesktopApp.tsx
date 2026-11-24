@@ -41,13 +41,18 @@ const PANE_DRAG_TYPE = 'application/x-agentpwa-pane';
 let draggingPane: string | null = null;
 
 /** ドロップ先の重ね表示の位置 */
+// 分割後のペインの形が分かるように、ペインの縁から少し内側に、新しいペインが入る半分を四角で示す
+const G = 4;
+const HALF = `calc(50% - ${G * 1.5}px)`;
 const ZONE_STYLE: Record<DropZone, React.CSSProperties> = {
-  left: { left: 0, top: 0, bottom: 0, width: '50%' },
-  right: { right: 0, top: 0, bottom: 0, width: '50%' },
-  top: { left: 0, right: 0, top: 0, height: '50%' },
-  bottom: { left: 0, right: 0, bottom: 0, height: '50%' },
-  center: { inset: 0 },
+  left: { left: G, top: G, bottom: G, width: HALF },
+  right: { right: G, top: G, bottom: G, width: HALF },
+  top: { left: G, right: G, top: G, height: HALF },
+  bottom: { left: G, right: G, bottom: G, height: HALF },
+  center: { inset: G },
 };
+/** 分割したときに、元のペインが残る側（新しいペインの反対側） */
+const REST_ZONE: Record<Exclude<DropZone, 'center'>, DropZone> = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
 const ZONE_LABEL: Record<Exclude<DropZone, 'center'>, string> = { left: '左に分割', right: '右に分割', top: '上に分割', bottom: '下に分割' };
 
 // ドラッグ中は、ビュワーの iframe などがドラッグを横取りしないように、body に印を付ける（styles.css の body.dragging）
@@ -135,7 +140,10 @@ function PaneView({
       if (kind !== dragKind) setDragKind(kind);
     },
     onDragLeave: (e: React.DragEvent) => {
-      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setZone(null);
+      // Safari などは relatedTarget が空のことがあるので、ポインターがペインの外に出たかを位置で見る
+      // （中の要素をまたぐたびに消えると、重ね表示がちらつく）
+      const r = e.currentTarget.getBoundingClientRect();
+      if (e.clientX <= r.left || e.clientX >= r.right || e.clientY <= r.top || e.clientY >= r.bottom) setZone(null);
     },
     onDrop: (e: React.DragEvent) => {
       const z = zone ?? zoneAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY);
@@ -151,9 +159,12 @@ function PaneView({
   };
   // ドロップすると何が起きるかを、範囲と文字で示す（VS Code と同じく、分割なら新しいペインが入る半分を塗る）
   const dropOverlay = zone && (
-    <div aria-hidden className="drop-overlay" style={{ ...ZONE_STYLE[zone] }}>
-      <span className="drop-label">{zone === 'center' ? (dragKind === 'pane' ? '入れ替え' : 'このペインに表示') : ZONE_LABEL[zone]}</span>
-    </div>
+    <>
+      {zone !== 'center' && <div aria-hidden className="drop-rest" style={ZONE_STYLE[REST_ZONE[zone]]} />}
+      <div aria-hidden className="drop-overlay" style={ZONE_STYLE[zone]}>
+        <span className="drop-label">{zone === 'center' ? (dragKind === 'pane' ? '入れ替え' : 'このペインに表示') : ZONE_LABEL[zone]}</span>
+      </div>
+    </>
   );
 
   const quick = sortedSessions(sessions).filter((x) => !layout.panes.some((p) => p.sessionId === x.id)).slice(0, 6);
@@ -287,7 +298,9 @@ function Splitter({ dir, onDrag, onReset }: { dir: 'col' | 'row'; onDrag: (delta
         }
       }}
       style={{
-        flex: 'none', background: 'var(--border)', touchAction: 'none', position: 'relative', zIndex: 2,
+        // 掴みやすい 9px のうち、真ん中の 1px だけを線として塗る。全体の box-sizing: border-box のままだと
+        // 透明な枠 8px が幅 1px を食いつぶして線が消えるので、ここだけ content-box にする
+        flex: 'none', boxSizing: 'content-box', background: 'var(--border)', touchAction: 'none', position: 'relative', zIndex: 2,
         ...(dir === 'col' ? { width: 1, cursor: 'col-resize', margin: '0 -4px', borderLeft: '4px solid transparent', borderRight: '4px solid transparent', backgroundClip: 'padding-box' } : { height: 1, cursor: 'row-resize', margin: '-4px 0', borderTop: '4px solid transparent', borderBottom: '4px solid transparent', backgroundClip: 'padding-box' }),
       }}
     />
