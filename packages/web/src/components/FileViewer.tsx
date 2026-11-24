@@ -141,7 +141,7 @@ function Body({ sessionId, info, nonce }: { sessionId: string; info: FileInfo; n
 
 type FsElement = HTMLElement & { webkitRequestFullscreen?: () => void };
 
-export function FileViewer({ sessionId, path, lead, trail }: { sessionId: string; path: string; lead?: React.ReactNode; trail?: React.ReactNode }) {
+export function FileViewer({ sessionId, path, lead, trail, onHeadDragStart }: { sessionId: string; path: string; lead?: React.ReactNode; trail?: React.ReactNode; /** ヘッダーをドラッグしてペインを動かす（iPad / Web） */ onHeadDragStart?: (e: React.DragEvent) => void }) {
   const session = useStore((s) => s.sessions[sessionId]);
   const events = useStore((s) => s.events[sessionId]);
   const cwd = session?.cwd ?? '';
@@ -196,7 +196,7 @@ export function FileViewer({ sessionId, path, lead, trail }: { sessionId: string
 
   return (
     <div className="viewer" style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <header className="viewer-head">
+      <header className="viewer-head" draggable={!!onHeadDragStart} onDragStart={onHeadDragStart}>
         {lead}
         <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <h2 className="ellipsis mono" style={{ fontSize: 12.5, fontWeight: 600 }} title={shown}>{shown}</h2>

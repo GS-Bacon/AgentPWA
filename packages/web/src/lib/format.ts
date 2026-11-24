@@ -87,3 +87,8 @@ export function relPath(text: string, cwd: string): string {
   if (i < 0) return text;
   return text.slice(0, i) + t.slice(i + base.length);
 }
+
+/** 実行中か（中断できる状態か）。入力欄の中断ボタンと Esc の中断で使う */
+export function isRunning(s: SessionSummary): boolean {
+  return s.status === 'running' || s.status === 'starting' || s.status === 'waiting_approval' || s.status === 'waiting_input';
+}

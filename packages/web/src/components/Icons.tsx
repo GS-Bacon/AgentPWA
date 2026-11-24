@@ -34,16 +34,7 @@ export const IconSend = (p: { size?: number }) => <Svg {...p} sw={2.2}><path d="
 export const IconStop = (p: { size?: number }) => <Svg {...p} fill><rect x="6" y="6" width="12" height="12" /></Svg>;
 export const IconMaximize = (p: { size?: number }) => <Svg {...p}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></Svg>;
 export const IconSidebar = (p: { size?: number }) => <Svg {...p}><rect x="3" y="4" width="18" height="16" /><path d="M9 4v16" /></Svg>;
-export const IconSplitDown = (p: { size?: number }) => <Svg {...p}><rect x="3" y="4" width="18" height="16" /><path d="M3 12h18" /></Svg>;
-export const IconSplitRight = (p: { size?: number }) => <Svg {...p}><rect x="3" y="4" width="18" height="16" /><path d="M12 4v16" /></Svg>;
 
-export const LayoutIcons = {
-  cols1: () => <Svg><rect x="3" y="4" width="18" height="16" /></Svg>,
-  cols2: () => <Svg><rect x="3" y="4" width="18" height="16" /><path d="M12 4v16" /></Svg>,
-  cols3: () => <Svg><rect x="3" y="4" width="18" height="16" /><path d="M9 4v16M15 4v16" /></Svg>,
-  grid4: () => <Svg><rect x="3" y="4" width="18" height="16" /><path d="M12 4v16M3 12h18" /></Svg>,
-  custom: () => <Svg><rect x="3" y="4" width="18" height="16" /><path d="M10 4v16M10 11h11" /></Svg>,
-};
 
 /** AI のアイコン（Claude は橙の吹き出し、Codex は青の </>）。プロジェクトに固定された AI を示す */
 export function AgentIcon({ agent, size = 14 }: { agent: 'claude' | 'codex'; size?: number }) {

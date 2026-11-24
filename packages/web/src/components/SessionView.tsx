@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { loadEvents, run, useStore } from '../lib/store.ts';
-import { relPath } from '../lib/format.ts';
+import { isRunning, relPath } from '../lib/format.ts';
 import { unarchiveSession } from '../lib/sessionActions.ts';
 import { buildItems, type Item, type ToolItem } from '../lib/transcript.ts';
 import { ApprovalCard, QuestionCard } from './Requests.tsx';
@@ -80,7 +80,7 @@ function Composer({ session, compact }: { session: SessionSummary; compact?: boo
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const running = session.status === 'running' || session.status === 'starting' || session.status === 'waiting_approval' || session.status === 'waiting_input';
+  const running = isRunning(session);
   const stopped = !session.live && (session.status === 'stopped' || session.status === 'error' || session.status === 'idle');
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
   const sw = usePermissionSwitch(session);

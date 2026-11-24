@@ -1,23 +1,28 @@
 // iPad / Web: 左の一覧と、何枚でも並べられるペイン。
-// レイアウトは 1列・2列・3列・2×2 と、境界をドラッグして自由に分割する「カスタム」。
-// 画面に収まらないペインは横スクロール（iPad は横スワイプ）で表示する。
+// 並べ方は VS Code のエディターグループと同じ操作: ペインの見出しをドラッグして、ほかのペインの上下左右の端に落とすと分割、
+// 中央に落とすと入れ替え。境界をドラッグして大きさを変え、境界のダブルクリックで均等にする。
+// 画面に収まらないときは横スクロール（iPad は横スワイプ）で表示する。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { SessionSummary } from '@agentpwa/hub/api';
-import { getState, onSessionsClosed, sortedSessions, useStore } from '../lib/store.ts';
+import { api } from '../lib/api.ts';
+import { getState, onSessionsClosed, run, sortedSessions, useStore } from '../lib/store.ts';
+import { isRunning } from '../lib/format.ts';
 import type { ArchiveSectionProps } from '../App.tsx';
 import { DRAG_TYPE, isWaiting, Rail, Sidebar } from './Sidebar.tsx';
 import {
   addPane,
   closePane,
+  dropSession,
+  equalizeCols,
+  equalizeRows,
   isEmptyPane,
+  movePane,
   openSession,
   openViewer,
   resizeWeights,
   setPaneSession,
-  splitBelow,
-  splitRight,
   useLayout,
-  type LayoutMode,
+  zoneAt,
+  type DropZone,
   type LayoutState,
   type Pane,
 } from '../lib/layout.ts';
@@ -28,20 +33,20 @@ import { NewSessionForm } from '../components/NewSession.tsx';
 import { Settings } from '../components/Settings.tsx';
 import { FileViewer } from '../components/FileViewer.tsx';
 import { onOpenFile } from '../lib/viewer.ts';
-import { AgentIcon, IconClose, IconMaximize, IconSidebar, IconSplitDown, IconSplitRight, LayoutIcons } from '../components/Icons.tsx';
+import { AgentIcon, IconClose, IconMaximize, IconSidebar } from '../components/Icons.tsx';
 
-const MODES: { mode: LayoutMode; label: string }[] = [
-  { mode: 'cols1', label: '1列' },
-  { mode: 'cols2', label: '2列' },
-  { mode: 'cols3', label: '3列' },
-  { mode: 'grid4', label: '2×2' },
-  { mode: 'custom', label: 'カスタム（境界をドラッグして分割）' },
-];
-const COLS: Record<Exclude<LayoutMode, 'custom'>, { cols: number; rows: number }> = {
-  cols1: { cols: 1, rows: 1 },
-  cols2: { cols: 2, rows: 1 },
-  cols3: { cols: 3, rows: 1 },
-  grid4: { cols: 2, rows: 2 },
+/** ペインを動かすドラッグのデータの種類 */
+const PANE_DRAG_TYPE = 'application/x-agentpwa-pane';
+/** ドラッグ中のペイン（dragover の間は dataTransfer の中身を読めないため、ここに持つ） */
+let draggingPane: string | null = null;
+
+/** ドロップ先の重ね表示の位置 */
+const ZONE_STYLE: Record<DropZone, React.CSSProperties> = {
+  left: { left: 0, top: 0, bottom: 0, width: '50%' },
+  right: { right: 0, top: 0, bottom: 0, width: '50%' },
+  top: { left: 0, right: 0, top: 0, height: '50%' },
+  bottom: { left: 0, right: 0, bottom: 0, height: '50%' },
+  center: { inset: 0 },
 };
 
 // ---- ペイン ----
@@ -69,21 +74,61 @@ function PaneView({
   const s = useStore((st) => (pane.sessionId ? st.sessions[pane.sessionId] : undefined));
   const sessions = useStore((st) => st.sessions);
   const now = useNow();
-  const [dragOver, setDragOver] = useState(false);
+  const [zone, setZone] = useState<DropZone | null>(null);
   const focused = layout.focused === pane.id;
   const waiting = s && s.rank <= 2;
 
-  const onDrop = (e: React.DragEvent) => {
-    const id = e.dataTransfer.getData(DRAG_TYPE);
-    setDragOver(false);
-    if (!id) return;
-    e.preventDefault();
-    update((l) => {
-      // 別のペインに出ていたら、そちらは空にする（同じセッションを2枚に出さない）
-      const cleared = { ...l, panes: l.panes.map((p) => (p.sessionId === id && p.id !== pane.id ? { ...p, sessionId: null } : p)) };
-      return setPaneSession(cleared, pane.id, id);
-    });
+  // 見出しをドラッグしてペインを動かす
+  const onHeadDragStart = (e: React.DragEvent) => {
+    // 見出しの中のボタンやメニューからのドラッグは扱わない
+    if ((e.target as HTMLElement).closest?.('button, [role="menu"]')) {
+      e.preventDefault();
+      return;
+    }
+    draggingPane = pane.id;
+    e.dataTransfer.setData(PANE_DRAG_TYPE, pane.id);
+    e.dataTransfer.effectAllowed = 'move';
   };
+  const onHeadDragEnd = () => {
+    draggingPane = null;
+  };
+
+  // ペインのドラッグと、一覧からのセッションのドラッグを受け付ける
+  const dropTarget = {
+    onDragOver: (e: React.DragEvent) => {
+      const types = e.dataTransfer.types;
+      const isPane = types.includes(PANE_DRAG_TYPE);
+      if (!isPane && !types.includes(DRAG_TYPE)) return;
+      if (isPane && draggingPane === pane.id) {
+        setZone(null);
+        return;
+      }
+      e.preventDefault();
+      e.dataTransfer.dropEffect = isPane ? 'move' : 'copy';
+      const z = zoneAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY);
+      if (z !== zone) setZone(z);
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setZone(null);
+    },
+    onDrop: (e: React.DragEvent) => {
+      const z = zone ?? zoneAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY);
+      setZone(null);
+      const paneId = e.dataTransfer.getData(PANE_DRAG_TYPE);
+      const sessionId = e.dataTransfer.getData(DRAG_TYPE);
+      if (!paneId && !sessionId) return;
+      e.preventDefault();
+      setMaximized(null);
+      if (paneId) update((l) => movePane(l, paneId, pane.id, z));
+      else update((l) => dropSession(l, sessionId, pane.id, z));
+    },
+  };
+  const dropOverlay = zone && (
+    <div
+      aria-hidden
+      style={{ position: 'absolute', ...ZONE_STYLE[zone], background: 'rgba(56, 139, 253, 0.15)', border: '1px solid var(--link)', pointerEvents: 'none', zIndex: 3 }}
+    />
+  );
 
   const quick = sortedSessions(sessions).filter((x) => !layout.panes.some((p) => p.sessionId === x.id)).slice(0, 6);
 
@@ -115,14 +160,18 @@ function PaneView({
         tabIndex={-1}
         onMouseDownCapture={() => !focused && update((l) => ({ ...l, focused: pane.id }))}
         onFocusCapture={() => !focused && update((l) => ({ ...l, focused: pane.id }))}
-        style={{ minWidth: 0, minHeight: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', scrollSnapAlign: 'start', height: '100%' }}
+        {...dropTarget}
+        onDragEnd={onHeadDragEnd}
+        style={{ position: 'relative', minWidth: 0, minHeight: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', height: '100%' }}
       >
         <FileViewer
           sessionId={pane.view.sessionId}
           path={pane.view.path}
           lead={<span className="pane-tag" style={focused ? { borderColor: 'var(--link)', color: 'var(--fg)' } : undefined}>{index + 1}</span>}
           trail={paneButtons}
+          onHeadDragStart={onHeadDragStart}
         />
+        {dropOverlay}
       </section>
     );
   }
@@ -134,18 +183,16 @@ function PaneView({
       tabIndex={-1}
       onMouseDownCapture={() => !focused && update((l) => ({ ...l, focused: pane.id }))}
       onFocusCapture={() => !focused && update((l) => ({ ...l, focused: pane.id }))}
-      onDragOver={(e) => {
-        if (e.dataTransfer.types.includes(DRAG_TYPE)) {
-          e.preventDefault();
-          setDragOver(true);
-        }
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={onDrop}
-      style={{ minWidth: 0, minHeight: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', outline: dragOver ? '2px dashed var(--link)' : undefined, outlineOffset: -2, scrollSnapAlign: 'start', height: '100%' }}
+      {...dropTarget}
+      style={{ position: 'relative', minWidth: 0, minHeight: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', height: '100%' }}
     >
       <header
+        draggable
+        onDragStart={onHeadDragStart}
+        onDragEnd={onHeadDragEnd}
+        title="ドラッグしてペインを移動・分割"
         style={{
+          cursor: 'grab',
           flex: 'none', padding: '5px 4px 5px 8px', background: 'var(--bg-muted)', borderTop: `2px solid ${waiting ? 'var(--attention)' : 'transparent'}`,
           borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, minHeight: 44,
         }}
@@ -170,16 +217,6 @@ function PaneView({
         ) : (
           <span className="muted" style={{ flex: 1, fontSize: 13 }}>空のペイン</span>
         )}
-        {layout.mode === 'custom' && (
-          <>
-            <button className="btn btn-ghost btn-icon-sm" aria-label="右に分割" title="右に分割" onClick={() => update((l) => splitRight(l, pane.id))}>
-              <IconSplitRight size={14} />
-            </button>
-            <button className="btn btn-ghost btn-icon-sm" aria-label="下に分割" title="下に分割" onClick={() => update((l) => splitBelow(l, pane.id))}>
-              <IconSplitDown size={14} />
-            </button>
-          </>
-        )}
         {paneButtons}
       </header>
       {s ? (
@@ -201,13 +238,15 @@ function PaneView({
   );
 }
 
-/** 自由分割の境界 */
-function Splitter({ dir, onDrag }: { dir: 'col' | 'row'; onDrag: (deltaPx: number) => void }) {
+/** ペインの境界。ドラッグで大きさを変え、ダブルクリックで均等にする */
+function Splitter({ dir, onDrag, onReset }: { dir: 'col' | 'row'; onDrag: (deltaPx: number) => void; onReset: () => void }) {
   const start = useRef(0);
   return (
     <div
       role="separator"
       aria-orientation={dir === 'col' ? 'vertical' : 'horizontal'}
+      title="ドラッグで大きさを変更 · ダブルクリックで均等"
+      onDoubleClick={onReset}
       onPointerDown={(e) => {
         start.current = dir === 'col' ? e.clientX : e.clientY;
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -233,16 +272,17 @@ function CustomPanes({ layout, update, renderPane }: { layout: LayoutState; upda
   const box = useRef<HTMLDivElement>(null);
   const byId = new Map(layout.panes.map((p, i) => [p.id, { p, i }]));
   return (
-    <div ref={box} style={{ flex: '1 1 auto', display: 'flex', minWidth: 0, minHeight: 0, background: 'var(--border)' }}>
+    <div ref={box} style={{ flex: '1 1 auto', display: 'flex', minWidth: 0, minHeight: 0, background: 'var(--border)', overflowX: 'auto', overflowY: 'hidden', overscrollBehaviorX: 'contain' }}>
       {layout.custom.map((col, ci) => (
         <div key={col.id} style={{ display: 'contents' }}>
           {ci > 0 && (
             <Splitter
               dir="col"
               onDrag={(d) => {
-                const w = box.current?.clientWidth ?? 1;
+                const w = box.current?.scrollWidth ?? 1;
                 update((l) => ({ ...l, custom: resizeWeights(l.custom, ci - 1, d / w) }));
               }}
+              onReset={() => update(equalizeCols)}
             />
           )}
           <div style={{ flex: `${col.weight} 1 0`, minWidth: 160, display: 'flex', flexDirection: 'column', minHeight: 0 }} data-col={col.id}>
@@ -258,6 +298,7 @@ function CustomPanes({ layout, update, renderPane }: { layout: LayoutState; upda
                         const h = (document.querySelector(`[data-col="${col.id}"]`) as HTMLElement | null)?.clientHeight ?? 1;
                         update((l) => ({ ...l, custom: l.custom.map((c) => (c.id === col.id ? { ...c, rows: resizeWeights(c.rows, ri - 1, d / h) } : c)) }));
                       }}
+                      onReset={() => update((l) => equalizeRows(l, col.id))}
                     />
                   )}
                   <div style={{ flex: `${r.weight} 1 0`, minHeight: 120, display: 'flex', flexDirection: 'column' }}>{renderPane(entry.p, entry.i)}</div>
@@ -267,34 +308,6 @@ function CustomPanes({ layout, update, renderPane }: { layout: LayoutState; upda
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function GridPanes({ layout, renderPane }: { layout: LayoutState; renderPane: (p: Pane, i: number) => React.ReactNode }) {
-  const base = COLS[layout.mode as Exclude<LayoutMode, 'custom'>];
-  const n = layout.panes.length;
-  // ペインが列より少ないときは、空きを作らずに幅いっぱいに広げる
-  const rows = n <= base.cols ? 1 : base.rows;
-  const cols = Math.max(1, Math.min(base.cols, rows === 1 ? n : base.cols));
-  const perPage = cols * rows;
-  return (
-    <div
-      style={{
-        flex: '1 1 auto', minWidth: 0, minHeight: 0, display: 'grid', gap: 1, background: 'var(--border)',
-        gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`, gridAutoColumns: `calc((100% - ${cols - 1}px) / ${cols})`,
-        overflowX: 'auto', overflowY: 'hidden', scrollSnapType: 'x mandatory', overscrollBehaviorX: 'contain',
-      }}
-    >
-      {layout.panes.map((p, i) => {
-        const page = Math.floor(i / perPage);
-        const within = i % perPage;
-        return (
-          <div key={p.id} style={{ gridRow: Math.floor(within / cols) + 1, gridColumn: page * cols + (within % cols) + 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-            {renderPane(p, i)}
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -309,14 +322,7 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
   const [newSession, setNewSession] = useState<{ cwd?: string } | null>(null);
   const [settings, setSettings] = useState(false);
   const [maximized, setMaximized] = useState<string | null>(null);
-  const [wide, setWide] = useState(() => window.innerWidth >= 1100);
   const isFinePointer = useMemo(() => window.matchMedia('(pointer: fine)').matches, []);
-
-  useEffect(() => {
-    const on = () => setWide(window.innerWidth >= 1100);
-    window.addEventListener('resize', on);
-    return () => window.removeEventListener('resize', on);
-  }, []);
 
   const waiting = sortedSessions(sessions).filter((s) => s.rank <= 3);
 
@@ -366,9 +372,26 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
     el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   }, [layout.focused]);
 
-  // キーボード: Alt+J で次の待ちへ、Alt+1〜9 でペインへ、Enter でフォーカス中ペインの許可
+  // キーボード: Alt+J で次の待ちへ、Alt+1〜9 でペインへ、Enter でフォーカス中ペインの許可、Esc でフォーカス中ペインの中断
   useEffect(() => {
+    // メニューやダイアログが開いているときの Esc は、それを閉じるだけにする。
+    // 閉じる処理が先に走って DOM から消えることがあるので、押した時点（捕捉フェーズ）で調べておく
+    let popupOpen = false;
+    const onKeyCapture = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') popupOpen = !!document.querySelector('.overlay, [role="menu"], [role="dialog"]');
+    };
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.isComposing && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        if (popupOpen || e.defaultPrevented) return;
+        const p = layout.panes.find((x) => x.id === layout.focused);
+        const s = p?.sessionId ? getState().sessions[p.sessionId] : undefined;
+        if (s && !s.archived && isRunning(s)) {
+          e.preventDefault();
+          const id = s.id;
+          void run(() => api.action(id, { type: 'interrupt' }));
+        }
+        return;
+      }
       if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyJ') {
         e.preventDefault();
         nextWaiting();
@@ -395,19 +418,17 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
         }
       }
     };
+    window.addEventListener('keydown', onKeyCapture, true);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKeyCapture, true);
+      window.removeEventListener('keydown', onKey);
+    };
   }, [layout, nextWaiting, update]);
 
   const renderPane = (p: Pane, i: number) => <PaneView key={p.id} pane={p} index={i} layout={layout} update={update} maximized={maximized === p.id} setMaximized={setMaximized} />;
 
-  const visibleCount = layout.mode === 'custom' ? layout.panes.length : Math.min(layout.panes.length, COLS[layout.mode].cols * COLS[layout.mode].rows);
-  const hint =
-    layout.mode === 'custom'
-      ? '境界をドラッグして調整 · 左の一覧からドラッグして配置'
-      : layout.panes.length > visibleCount
-        ? `${visibleCount} / ${layout.panes.length} ペイン表示 · ${isFinePointer ? '横スクロール' : '横スワイプ'}で残り${layout.panes.length - visibleCount}つ`
-        : `${layout.panes.length} ペイン`;
+  const hint = `${layout.panes.length} ペイン · 見出しをドラッグして移動・分割 · 境界のダブルクリックで均等`;
 
   const sidebarShown = layout.sidebarOpen;
   const maxPane = maximized ? layout.panes.find((p) => p.id === maximized) : undefined;
@@ -419,28 +440,7 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
           <IconSidebar />
         </button>
         <h1 style={{ fontSize: 15, fontWeight: 600 }}>AgentPWA</h1>
-        <div role="group" aria-label="レイアウト" style={{ display: 'flex', marginLeft: 8, border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', flex: 'none' }}>
-          {MODES.filter((m) => m.mode !== 'custom' || isFinePointer || wide).map((m, i, arr) => {
-            const Icon = LayoutIcons[m.mode];
-            const on = layout.mode === m.mode;
-            return (
-              <button
-                key={m.mode}
-                aria-label={m.label}
-                title={m.label}
-                aria-pressed={on}
-                onClick={() => {
-                  setMaximized(null);
-                  update((l) => ({ ...l, mode: m.mode }));
-                }}
-                style={{ width: 40, height: 32, border: 'none', borderRight: i < arr.length - 1 ? '1px solid var(--border)' : 'none', background: on ? 'var(--border)' : 'var(--btn-bg)', color: on ? 'var(--fg)' : 'var(--fg-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-              >
-                <Icon />
-              </button>
-            );
-          })}
-        </div>
-        <span className="muted ellipsis" style={{ fontSize: 12 }}>{hint}</span>
+        <span className="muted ellipsis" style={{ fontSize: 12, marginLeft: 8 }}>{hint}</span>
         <span style={{ flex: '1 1 auto' }} />
         <ConnState />
         <button className={`btn${waiting.length ? ' btn-attention' : ''}`} onClick={nextWaiting} disabled={waiting.length === 0} title="返答待ちのセッションへ順に移動（Alt+J）">
@@ -465,10 +465,8 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
         <main style={{ flex: '1 1 auto', minWidth: 0, minHeight: 0, display: 'flex' }}>
           {maxPane ? (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>{renderPane(maxPane, layout.panes.indexOf(maxPane))}</div>
-          ) : layout.mode === 'custom' ? (
-            <CustomPanes layout={layout} update={update} renderPane={renderPane} />
           ) : (
-            <GridPanes layout={layout} renderPane={renderPane} />
+            <CustomPanes layout={layout} update={update} renderPane={renderPane} />
           )}
         </main>
       </div>
