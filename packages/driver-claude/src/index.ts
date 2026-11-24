@@ -19,6 +19,8 @@ export interface ClaudeDriverOptions {
   /** 子プロセスの起動役。省略時はこのPC（local） */
   launcher?: ProcessLauncher;
   env?: NodeJS.ProcessEnv;
+  /** 既定のモデルとエフォートが実際に何になるかを CLI に聞くか（省略時は聞く） */
+  resolveDefaults?: boolean;
   /** 旧版（MCP の許可サーバー）の名残。使わない */
   nodePath?: string;
 }
@@ -57,7 +59,7 @@ export function createClaudeDriver(options: ClaudeDriverOptions = {}): AgentDriv
       return checkClaudeAuth(launcher, claudePath, env);
     },
     async start(opts: StartOptions, emit: (event: DriverEvent) => void): Promise<DriverSession> {
-      const session = new ClaudeSession(opts, emit, { launcher, claudePath, env });
+      const session = new ClaudeSession(opts, emit, { launcher, claudePath, env, resolveDefaults: options.resolveDefaults ?? true });
       await session.init();
       return session;
     },

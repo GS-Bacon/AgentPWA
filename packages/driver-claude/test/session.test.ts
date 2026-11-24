@@ -37,7 +37,7 @@ class FakeCli extends EventEmitter {
   }
 }
 
-function setup(mode: PermissionMode = 'ask', extra: Partial<StartOptions> = {}) {
+function setup(mode: PermissionMode = 'ask', extra: Partial<StartOptions> = {}, resolveDefaults = false) {
   const clis: FakeCli[] = [];
   const specs: LaunchSpec[] = [];
   const launcher: ProcessLauncher = {
@@ -53,7 +53,7 @@ function setup(mode: PermissionMode = 'ask', extra: Partial<StartOptions> = {}) 
     remove: async () => {},
   };
   const events: DriverEvent[] = [];
-  const session = new ClaudeSession({ sessionId: 's1', cwd: '/w', permissionMode: mode, ...extra },(e) => events.push(e), { launcher, claudePath: 'claude', env: {} });
+  const session = new ClaudeSession({ sessionId: 's1', cwd: '/w', permissionMode: mode, ...extra },(e) => events.push(e), { launcher, claudePath: 'claude', env: {}, resolveDefaults });
   return { session, events, clis, specs };
 }
 
@@ -209,6 +209,43 @@ describe('ClaudeSession（stdio の制御メッセージ）', () => {
     await p;
     expect(events.at(-2)).toMatchObject({ type: 'error', fatal: false });
     expect(events.at(-1)).toEqual({ type: 'model', model: 'opus' });
+  });
+
+  it('プロセスが無いときは CLI を短く起動して get_settings を聞き、既定の解決結果を model で送り直す', async () => {
+    const { session, events, clis, specs } = setup('ask', { effort: 'high' }, true);
+    await session.init();
+    await tick();
+    const probe = clis[0];
+    expect(specs[0].args).toContain('--effort');
+    expect(specs[0].args).not.toContain('--model');
+    expect(specs[0].args).not.toContain('--permission-prompt-tool');
+    const r = probe.written[0];
+    expect(r).toMatchObject({ type: 'control_request', request: { subtype: 'get_settings' } });
+    probe.out({ type: 'control_response', response: { subtype: 'success', request_id: r.request_id, response: { applied: { model: 'claude-opus-5-5', effort: 'high' } } } });
+    await tick();
+    expect(events.at(-1)).toEqual({ type: 'model', effort: 'high', resolvedModel: 'claude-opus-5-5', resolvedEffort: 'high' });
+  });
+
+  it('動いているプロセスでは、set_model の後に get_settings で調べ直す', async () => {
+    const { session, events, clis } = setup('ask', {}, true);
+    await session.init();
+    await tick();
+    clis[0].out({ type: 'control_response', response: { subtype: 'success', request_id: clis[0].written[0].request_id, response: { applied: { model: 'claude-opus-5-5', effort: 'medium' } } } });
+    await tick();
+    await session.send({ type: 'send', text: 'x' });
+    const cli = clis[1];
+    const p = session.send({ type: 'set_model', model: 'claude-opus-5' });
+    await tick();
+    cli.out({ type: 'control_response', response: { subtype: 'success', request_id: cli.written.at(-1).request_id } });
+    await p;
+    // 設定が変わったので、解決済みの値はいったん外れる
+    expect(events.at(-1)).toEqual({ type: 'model', model: 'claude-opus-5' });
+    await tick();
+    const g = cli.written.at(-1);
+    expect(g.request).toEqual({ subtype: 'get_settings' });
+    cli.out({ type: 'control_response', response: { subtype: 'success', request_id: g.request_id, response: { applied: { model: 'claude-opus-5', effort: 'high' } } } });
+    await tick();
+    expect(events.at(-1)).toEqual({ type: 'model', model: 'claude-opus-5', resolvedModel: 'claude-opus-5', resolvedEffort: 'high' });
   });
 
   it('プロセスが無いときの切り替えは、次の起動の --model / --effort に使う', async () => {

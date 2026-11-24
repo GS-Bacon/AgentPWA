@@ -7,7 +7,7 @@ import { api } from '../lib/api.ts';
 import { showToast, useStore } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL, MODE_NOTE } from '../lib/format.ts';
 import { confirmFullAuto } from '../lib/sessionActions.ts';
-import { EFFORTS, EFFORT_LABEL, MODELS } from '../lib/models.ts';
+import { EFFORTS, EFFORT_LABEL, MODELS, defaultEffortLabel, defaultModelLabel, knownDefault } from '../lib/models.ts';
 import { AgentIcon, IconClose, IconPlus } from './Icons.tsx';
 import { NewProjectForm } from './NewProject.tsx';
 
@@ -74,6 +74,8 @@ export function NewSessionForm({
   };
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
+  // 既定が何になるか（既定で動いたセッションから覚えたもの。まだ分からなければ「既定」とだけ出す）
+  const known = knownDefault(agent);
   const auth = info?.agents[agent]?.auth;
   const blocked = auth && !auth.ok;
 
@@ -149,7 +151,7 @@ export function NewSessionForm({
           <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
             {MODELS[agent].map((m) => (
               <option key={m.value} value={m.value}>
-                {m.label}
+                {m.value === '' ? defaultModelLabel(known.model) : m.label}
               </option>
             ))}
           </select>
@@ -157,7 +159,8 @@ export function NewSessionForm({
         <label className="field">
           エフォート
           <select className="select" value={effort} onChange={(e) => setEffort(e.target.value as EffortLevel | '')}>
-            <option value="">既定</option>
+            {/* エフォートの既定はモデルごとに違うので、既定のモデルのときだけ値を添える */}
+            <option value="">{defaultEffortLabel(model === '' ? known.effort : undefined)}</option>
             {EFFORTS[agent].map((e) => (
               <option key={e} value={e}>
                 {EFFORT_LABEL[e]}

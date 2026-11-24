@@ -10,6 +10,9 @@ export interface SessionRecord {
   folderName: string;
   model?: string;
   effort?: EffortLevel;
+  /** 既定やエイリアスを解決した実際の値（Driver が分かったときだけ） */
+  resolvedModel?: string;
+  resolvedEffort?: EffortLevel;
   permissionMode: PermissionMode;
   status: SessionStatus;
   statusReason?: string;
@@ -112,6 +115,8 @@ export function applyEvent(rec: SessionRecord, ev: SessionEvent): SessionRecord 
       // Driver が報告した「現在のモデルとエフォート」。次に起動・再開するときもこの値を渡す
       r.model = ev.model;
       r.effort = ev.effort;
+      r.resolvedModel = ev.resolvedModel;
+      r.resolvedEffort = ev.resolvedEffort;
       break;
     case 'tool':
       r.activity = oneLine(`${ev.name} ${ev.summary}`);
@@ -197,6 +202,8 @@ export function toSummary(rec: SessionRecord, extra: { machine: string; live: bo
     machine: extra.machine,
     model: rec.model,
     effort: rec.effort,
+    resolvedModel: rec.resolvedModel,
+    resolvedEffort: rec.resolvedEffort,
     permissionMode: rec.permissionMode,
     status: rec.status,
     statusReason: rec.statusReason,

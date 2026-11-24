@@ -22,6 +22,9 @@ export interface SessionSummary {
   /** 現在のモデルとエフォート（Driver が送る model の値。省略はエージェントの既定） */
   model?: string;
   effort?: EffortLevel;
+  /** 既定やエイリアスを解決した実際のモデルとエフォート（例: claude-opus-5-5 / medium）。Driver が分かったときだけ */
+  resolvedModel?: string;
+  resolvedEffort?: EffortLevel;
   /** 現在の権限モード（Driver が送る permission_mode の値） */
   permissionMode: PermissionMode;
   status: SessionStatus;

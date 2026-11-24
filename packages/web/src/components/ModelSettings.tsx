@@ -5,7 +5,7 @@ import type { EffortLevel } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { run } from '../lib/store.ts';
-import { EFFORTS, EFFORT_LABEL, MODELS, modelSummary } from '../lib/models.ts';
+import { EFFORTS, EFFORT_LABEL, MODELS, aliasModelLabel, defaultEffortLabel, defaultModelLabel, knownDefault, modelSummary, rememberDefault } from '../lib/models.ts';
 import { useDismiss } from './common.tsx';
 
 /** 反映を待つ時間。これを過ぎても model が来なければ（失敗）、表示を元に戻す */
@@ -32,8 +32,13 @@ export function ModelButton({ session: s, disabled }: { session: SessionSummary;
   // Driver が現在の設定を知らせてきたら、待ちを解く
   useEffect(() => setPending(null), [s.model, s.effort, setPending]);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+  // 既定で動いているセッションから、既定のモデルが何かを覚えておく
+  useEffect(() => rememberDefault(s.agent, s), [s.agent, s.model, s.effort, s.resolvedModel, s.resolvedEffort]);
 
   const shown: Shown = pending ?? { model: s.model, effort: s.effort };
+  // 解決済みの値は、切り替え中は古いので使わない
+  const resolved = pending ? undefined : { model: s.resolvedModel, effort: s.resolvedEffort };
+  const defModel = !shown.model && resolved?.model ? resolved.model : knownDefault(s.agent).model;
   const models = MODELS[s.agent];
   // 一覧にないモデル（正式名で始めたセッションなど）も選択中として出す
   const modelItems = shown.model && !models.some((m) => m.value === shown.model) ? [...models, { value: shown.model, label: shown.model }] : models;
@@ -50,7 +55,7 @@ export function ModelButton({ session: s, disabled }: { session: SessionSummary;
     if (!ok) setPending(null);
   };
 
-  const label = modelSummary(s.agent, shown.model, shown.effort);
+  const label = modelSummary(s.agent, shown.model, shown.effort, resolved);
   return (
     <div className="menu-wrap" ref={ref} style={{ flex: 'none', minWidth: 0 }}>
       <button
@@ -74,7 +79,7 @@ export function ModelButton({ session: s, disabled }: { session: SessionSummary;
             return (
               <button key={`m-${m.value}`} role="menuitemradio" aria-checked={on} className="menu-mode" onClick={() => void apply({ model: m.value || null })}>
                 <span className="menu-check" aria-hidden="true">{on ? '✓' : ''}</span>
-                <span>{m.label}</span>
+                <span>{m.value === '' ? defaultModelLabel(defModel) : on ? aliasModelLabel(s.agent, m.value, resolved?.model) : m.label}</span>
               </button>
             );
           })}
@@ -84,7 +89,7 @@ export function ModelButton({ session: s, disabled }: { session: SessionSummary;
             return (
               <button key={`e-${e ?? ''}`} role="menuitemradio" aria-checked={on} className="menu-mode" onClick={() => void apply({ effort: e ?? null })}>
                 <span className="menu-check" aria-hidden="true">{on ? '✓' : ''}</span>
-                <span>{e ? EFFORT_LABEL[e] : '既定'}</span>
+                <span>{e ? EFFORT_LABEL[e] : defaultEffortLabel(shown.effort ? undefined : resolved?.effort)}</span>
               </button>
             );
           })}

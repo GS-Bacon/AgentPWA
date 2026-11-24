@@ -233,6 +233,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const ev: DriverEvent = { type: 'model' };
       if (model) ev.model = model;
       if (effort) ev.effort = effort;
+      // 設定が変わらなければ、解決済みの値はそのまま使える（変わったら次の起動で Driver が調べ直す）
+      if (model === rec.model && effort === rec.effort) {
+        if (rec.resolvedModel) ev.resolvedModel = rec.resolvedModel;
+        if (rec.resolvedEffort) ev.resolvedEffort = rec.resolvedEffort;
+      }
       this.record(id, ev);
       return;
     }

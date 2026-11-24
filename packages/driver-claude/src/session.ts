@@ -9,7 +9,7 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import readline from 'node:readline';
-import type { DriverEvent, DriverSession, EffortLevel, PermissionMode, SessionStatus, StartOptions, UserAction } from '@agentpwa/shared';
+import { EFFORT_LEVELS, type DriverEvent, type DriverSession, type EffortLevel, type PermissionMode, type SessionStatus, type StartOptions, type UserAction } from '@agentpwa/shared';
 import type { ProcessLauncher } from './launcher.ts';
 import { StreamMapper } from './mapper.ts';
 import { answerToUpdatedInput, buildPrompt, sessionAllowKey, toClaudePermissionMode } from './permissions.ts';
@@ -19,6 +19,8 @@ const INTERRUPT_TIMEOUT_MS = 5000;
 const STOP_TIMEOUT_MS = 3000;
 /** こちらから送った制御要求（権限モードの切り替えなど）の応答を待つ上限 */
 const CONTROL_TIMEOUT_MS = 15_000;
+/** 既定のモデルとエフォートを調べるために短く起動した CLI を、あきらめて終了させるまでの時間 */
+const PROBE_TIMEOUT_MS = 20_000;
 /** 親の Claude Code から受け継ぐと子の CLI の動作が変わる環境変数 */
 const STRIP_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT'];
 
@@ -46,6 +48,17 @@ export interface ClaudeSessionDeps {
   launcher: ProcessLauncher;
   claudePath: string;
   env: NodeJS.ProcessEnv;
+  /**
+   * 既定のモデルとエフォートが実際に何になるかを調べて model イベントの resolvedModel / resolvedEffort に入れる。
+   * プロセスが無いときは CLI を短く起動して聞く（API は呼ばない）。省略時は調べない（テスト用）
+   */
+  resolveDefaults?: boolean;
+}
+
+/** 既定やエイリアスを解決した、実際に使われるモデルとエフォート */
+interface Resolved {
+  model?: string;
+  effort?: EffortLevel;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -67,6 +80,9 @@ export class ClaudeSession implements DriverSession {
   /** いまのモデルとエフォート（undefined は CLI の既定。次に起動するときの --model / --effort にも使う） */
   private model: string | undefined;
   private effort: EffortLevel | undefined;
+  private resolved: Resolved = {};
+  /** 調べ直しが重なったとき、古い結果で上書きしないための番号 */
+  private resolveGen = 0;
   private stopping = false;
   private stopped = false;
   private interrupting = false;
@@ -90,6 +106,7 @@ export class ClaudeSession implements DriverSession {
   async init(): Promise<void> {
     this.emitMode(this.mode);
     this.emitModel();
+    void this.refreshResolved();
     if (this.opts.initialPrompt) {
       this.sendText(this.opts.initialPrompt);
     } else {
@@ -368,7 +385,78 @@ export class ClaudeSession implements DriverSession {
     const ev: DriverEvent = { type: 'model' };
     if (this.model) ev.model = this.model;
     if (this.effort) ev.effort = this.effort;
+    if (this.resolved.model) ev.resolvedModel = this.resolved.model;
+    if (this.resolved.effort) ev.resolvedEffort = this.resolved.effort;
     this.emit(ev);
+  }
+
+  /**
+   * いまの設定で実際に使われるモデルとエフォートを CLI に聞き（get_settings の applied）、分かったら model を送り直す。
+   * 失敗しても何もしない（UI は「既定」とだけ出す）。
+   */
+  private async refreshResolved(): Promise<void> {
+    if (!this.deps.resolveDefaults) return;
+    const gen = ++this.resolveGen;
+    const want = `${this.model ?? ''}|${this.effort ?? ''}`;
+    let res: Record<string, unknown> | undefined;
+    try {
+      res = this.proc ? await this.sendControl({ subtype: 'get_settings' }) : await this.probeSettings();
+    } catch {
+      return;
+    }
+    // 調べている間に設定が変わったり、別の調べ直しが始まったりしたら捨てる
+    if (gen !== this.resolveGen || this.stopped || want !== `${this.model ?? ''}|${this.effort ?? ''}`) return;
+    const applied = (res?.applied ?? {}) as Record<string, unknown>;
+    const next: Resolved = {};
+    if (typeof applied.model === 'string' && applied.model) next.model = applied.model;
+    if (typeof applied.effort === 'string' && EFFORT_LEVELS.includes(applied.effort as EffortLevel)) next.effort = applied.effort as EffortLevel;
+    if (next.model === this.resolved.model && next.effort === this.resolved.effort) return;
+    this.resolved = next;
+    this.emitModel();
+  }
+
+  /** プロセスが無いとき、同じ --model / --effort で CLI を短く起動して get_settings を聞く（ユーザーの指示は送らない）。 */
+  private probeSettings(): Promise<Record<string, unknown>> {
+    const args = ['-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose'];
+    if (this.model) args.push('--model', this.model);
+    if (this.effort) args.push('--effort', this.effort);
+    const env: NodeJS.ProcessEnv = { ...this.deps.env };
+    for (const k of STRIP_ENV) delete env[k];
+    const proc = this.deps.launcher.spawn({ command: this.deps.claudePath, args, cwd: this.opts.cwd, env });
+    const requestId = `agentpwa-probe-${randomUUID()}`;
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const finish = (err: Error | null, res?: Record<string, unknown>) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        proc.stdin.end();
+        // 応答を受けたら待たずに終わらせる（プロセスは入力の終わりでも終了する）
+        if (proc.exitCode === null) proc.kill();
+        if (err) reject(err);
+        else resolve(res ?? {});
+      };
+      const timer = setTimeout(() => finish(new Error('claude CLI から応答がありません')), PROBE_TIMEOUT_MS);
+      proc.on('error', (e) => finish(e));
+      proc.on('exit', () => finish(new Error('claude CLI が終了しました')));
+      proc.stdin.on('error', () => {
+        /* 終了時の EPIPE は exit で扱う */
+      });
+      proc.stderr.resume();
+      readline.createInterface({ input: proc.stdout }).on('line', (line) => {
+        let msg: Json;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          return;
+        }
+        const r = msg?.type === 'control_response' ? msg.response : undefined;
+        if (!r || r.request_id !== requestId) return;
+        if (r.subtype === 'success') finish(null, r.response ?? {});
+        else finish(new Error(String(r.error ?? '失敗しました')));
+      });
+      proc.stdin.write(JSON.stringify({ type: 'control_request', request_id: requestId, request: { subtype: 'get_settings' } }) + '\n');
+    });
   }
 
   /**
@@ -380,6 +468,7 @@ export class ClaudeSession implements DriverSession {
     const nextModel = model === undefined ? this.model : model || undefined;
     const nextEffort = effort === undefined ? this.effort : effort ?? undefined;
     const errors: string[] = [];
+    const before = `${this.model ?? ''}|${this.effort ?? ''}`;
     if (nextModel !== this.model) {
       if (this.proc) {
         try {
@@ -407,8 +496,12 @@ export class ClaudeSession implements DriverSession {
       }
     }
     if (errors.length > 0) this.emit({ type: 'error', message: errors.join('\n'), fatal: false });
+    const changed = before !== `${this.model ?? ''}|${this.effort ?? ''}`;
+    // 解決済みの値は設定が変わったら古くなるので、調べ直すまで外す
+    if (changed) this.resolved = {};
     // 反映できた分を含む現在の設定を知らせる（何も変わらなくても、Web の切り替え中の表示を解くために送る）
     this.emitModel();
+    if (changed) void this.refreshResolved();
   }
 
   // ---- ターン・プロセスの終わり ----

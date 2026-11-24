@@ -145,7 +145,17 @@ export type DriverEvent =
    * 現在のモデルとエフォート（どちらも省略はエージェントの既定）。起動直後と、set_model を反映したときに送る。
    * 差分ではなく、両方の現在値を送る。Hub と Web はこのイベントの値を「現在の設定」として扱う。
    */
-  | { type: 'model'; model?: string; effort?: EffortLevel }
+  | {
+      type: 'model';
+      model?: string;
+      effort?: EffortLevel;
+      /**
+       * 実際に使われるモデルとエフォート（既定やエイリアスを解決した値。例: 'claude-opus-5-5' と 'medium'）。
+       * Driver が調べられたときだけ付ける。UI はこれで「既定」が何なのかを表示する。
+       */
+      resolvedModel?: string;
+      resolvedEffort?: EffortLevel;
+    }
   | { type: 'usage'; label: string; percent?: number; resetsAt?: string }
   | { type: 'error'; message: string; fatal: boolean };
 
