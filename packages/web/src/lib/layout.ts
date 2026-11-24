@@ -72,7 +72,7 @@ export function syncCustom(s: LayoutState): LayoutState {
     .filter((c) => c.rows.length > 0);
   const placed = new Set(custom.flatMap((c) => c.rows.map((r) => r.paneId)));
   for (const p of s.panes) {
-    if (!placed.has(p.id)) custom = [...custom, { id: newId('c'), weight: 1, rows: [{ paneId: p.id, weight: 1 }] }];
+    if (!placed.has(p.id)) custom = [...custom, { id: newId('c'), weight: avgWeight(custom), rows: [{ paneId: p.id, weight: 1 }] }];
   }
   // panes を見た目の順（列を左から、列の中は上から）に並べる。ペインの番号と Alt+1〜9 がこの順になる
   const order = new Map(custom.flatMap((c) => c.rows.map((r) => r.paneId)).map((id, i) => [id, i]));
@@ -184,26 +184,36 @@ export function zoneAt(rect: { left: number; top: number; width: number; height:
 
 /** 木からペインを外す（空いた列は消す） */
 function detach(custom: CustomCol[], paneId: string): CustomCol[] {
-  return custom.map((c) => ({ ...c, rows: c.rows.filter((r) => r.paneId !== paneId) })).filter((c) => c.rows.length > 0);
+  return custom
+    .map((c) => {
+      const rows = c.rows.filter((r) => r.paneId !== paneId);
+      // 1枚だけ残った列は、高さの重みを 1 に戻す（次に上下に分けたとき半分ずつになるように）
+      return { ...c, rows: rows.length === 1 ? [{ ...rows[0], weight: 1 }] : rows };
+    })
+    .filter((c) => c.rows.length > 0);
 }
 
-/** 木の中で、target の上下左右にペインを入れる（target の大きさを半分ずつ分ける） */
+/** 重みの平均（足すペインを、ほかと同じ大きさにするため） */
+function avgWeight(items: { weight: number }[]): number {
+  return items.length ? items.reduce((n, x) => n + x.weight, 0) / items.length : 1;
+}
+
+/**
+ * 木の中で、target の上下左右にペインを入れる。
+ * 足すペインは、その並びの平均の大きさにする（隣を半分にしない）。こうすると、ペインを外したり戻したりしても大きさが崩れない。
+ */
 function insertAt(custom: CustomCol[], paneId: string, targetId: string, zone: Exclude<DropZone, 'center'>): CustomCol[] {
   const ci = custom.findIndex((c) => c.rows.some((r) => r.paneId === targetId));
-  if (ci < 0) return [...custom, { id: newId('c'), weight: 1, rows: [{ paneId, weight: 1 }] }];
+  if (ci < 0) return [...custom, { id: newId('c'), weight: avgWeight(custom), rows: [{ paneId, weight: 1 }] }];
   const out = [...custom];
   const col = out[ci];
   if (zone === 'left' || zone === 'right') {
-    const half = col.weight / 2;
-    out[ci] = { ...col, weight: half };
-    out.splice(zone === 'left' ? ci : ci + 1, 0, { id: newId('c'), weight: half, rows: [{ paneId, weight: 1 }] });
+    out.splice(zone === 'left' ? ci : ci + 1, 0, { id: newId('c'), weight: avgWeight(custom), rows: [{ paneId, weight: 1 }] });
     return out;
   }
   const ri = col.rows.findIndex((r) => r.paneId === targetId);
   const rows = [...col.rows];
-  const half = rows[ri].weight / 2;
-  rows[ri] = { ...rows[ri], weight: half };
-  rows.splice(zone === 'top' ? ri : ri + 1, 0, { paneId, weight: half });
+  rows.splice(zone === 'top' ? ri : ri + 1, 0, { paneId, weight: avgWeight(col.rows) });
   out[ci] = { ...col, rows };
   return out;
 }
