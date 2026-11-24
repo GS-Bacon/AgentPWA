@@ -4,7 +4,7 @@
 // Codex タブの画面はこれで作る。許可要求・質問・ターン終了のところでは、ユーザーの操作を待ってから続きを流す。
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentDriver, AgentKind, DriverEvent, DriverSession, StartOptions, UserAction } from '@agentpwa/shared';
+import type { AgentDriver, AgentKind, DriverEvent, DriverSession, EffortLevel, StartOptions, UserAction } from '@agentpwa/shared';
 
 export interface FakeDriverOptions {
   kind: AgentKind;
@@ -42,7 +42,20 @@ class FakeSession implements DriverSession {
     private readonly opts: StartOptions,
     private readonly emit: (e: DriverEvent) => void,
     private readonly delayMs: number,
-  ) {}
+  ) {
+    this.model = opts.model || undefined;
+    this.effort = opts.effort;
+  }
+
+  private model: string | undefined;
+  private effort: EffortLevel | undefined;
+
+  emitModel(): void {
+    const ev: DriverEvent = { type: 'model' };
+    if (this.model) ev.model = this.model;
+    if (this.effort) ev.effort = this.effort;
+    this.emit(ev);
+  }
 
   run(): void {
     void this.play();
@@ -53,6 +66,13 @@ class FakeSession implements DriverSession {
     if (action.type === 'set_permission_mode') {
       // どの状態でも受け付け、すぐに反映したことにする
       this.emit({ type: 'permission_mode', mode: action.mode });
+      return;
+    }
+    if (action.type === 'set_model') {
+      // モデルとエフォートも、どの状態でもすぐに反映したことにする
+      if (action.model !== undefined) this.model = action.model || undefined;
+      if (action.effort !== undefined) this.effort = action.effort ?? undefined;
+      this.emitModel();
       return;
     }
     if (action.type === 'interrupt') {
@@ -216,6 +236,7 @@ export function createFakeDriver(options: FakeDriverOptions): FakeDriver {
       const s = new FakeSession(events, opts, emit, delayMs);
       // 起動したら、使っている権限モードを知らせる（docs/protocol.md 3.1）
       emit({ type: 'permission_mode', mode: opts.permissionMode });
+      s.emitModel();
       s.run();
       return s;
     },

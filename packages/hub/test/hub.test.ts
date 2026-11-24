@@ -27,9 +27,11 @@ class TestDriver implements AgentDriver {
   async checkAuth() {
     return this.auth;
   }
+  lastModel: { model?: string; effort?: StartOptions['effort'] } = {};
   async start(opts: StartOptions, emit: (e: DriverEvent) => void): Promise<DriverSession> {
     this.starts.push(opts);
     this.emit = emit;
+    this.lastModel = { model: opts.model, effort: opts.effort };
     emit({ type: 'status', status: 'starting' });
     emit({ type: 'resume_token', token: opts.resumeToken ?? `token-${opts.sessionId}` });
     emit({ type: 'permission_mode', mode: opts.permissionMode });
@@ -39,6 +41,15 @@ class TestDriver implements AgentDriver {
         this.actions.push(a);
         if (a.type === 'send') emit({ type: 'status', status: 'running' });
         if (a.type === 'set_permission_mode') emit({ type: 'permission_mode', mode: a.mode });
+        if (a.type === 'set_model') {
+          const ev: DriverEvent = { type: 'model' };
+          const model = a.model === undefined ? this.lastModel.model : a.model ?? undefined;
+          const effort = a.effort === undefined ? this.lastModel.effort : a.effort ?? undefined;
+          if (model) ev.model = model;
+          if (effort) ev.effort = effort;
+          this.lastModel = { model, effort };
+          emit(ev);
+        }
       },
       stop: async () => {
         this.stops++;
@@ -178,6 +189,50 @@ describe('SessionManager', () => {
     await first.manager.stop(s.id);
     await expect(first.manager.action(s.id, { type: 'approve', requestId: 'x', decision: 'allow' })).rejects.toThrow('動いていません');
     first.store.close();
+  });
+});
+
+describe('モデルとエフォート', () => {
+  it('起動時のモデルとエフォートを Driver に渡す', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, model: 'opus', effort: 'high', prompt: 'hi' });
+    expect(driver.starts[0]).toMatchObject({ model: 'opus', effort: 'high' });
+    expect(manager.get(s.id)).toMatchObject({ model: 'opus', effort: 'high' });
+    store.close();
+  });
+
+  it('使えない文字のモデル名と、知らないエフォートは拒否する', async () => {
+    const { manager, store, driver } = setup();
+    await expect(manager.create({ cwd: config.folders[0].path, model: 'opus --dangerously' })).rejects.toThrow('モデル名');
+    // @ts-expect-error 知らない値
+    await expect(manager.create({ cwd: config.folders[0].path, effort: 'huge' })).rejects.toThrow('エフォート');
+    const s = await manager.create({ cwd: config.folders[0].path, prompt: 'hi' });
+    await expect(manager.action(s.id, { type: 'set_model', model: 'a b' })).rejects.toThrow('モデル名');
+    expect(driver.actions.some((a) => a.type === 'set_model')).toBe(false);
+    store.close();
+  });
+
+  it('set_model を Driver に渡し、反映された値になる（省略は変えず、null は既定に戻す）', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, model: 'opus', prompt: 'hi' });
+    await manager.action(s.id, { type: 'set_model', effort: 'max' });
+    expect(driver.actions).toContainEqual({ type: 'set_model', effort: 'max' });
+    expect(manager.get(s.id)).toMatchObject({ model: 'opus', effort: 'max' });
+    await manager.action(s.id, { type: 'set_model', model: null });
+    expect(manager.get(s.id).model).toBeUndefined();
+    expect(manager.get(s.id).effort).toBe('max');
+    store.close();
+  });
+
+  it('止まっているセッションの設定は Hub が覚えて、次の起動で渡す', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, model: 'opus' });
+    await manager.stop(s.id);
+    await manager.action(s.id, { type: 'set_model', model: 'sonnet', effort: 'low' });
+    expect(manager.get(s.id)).toMatchObject({ model: 'sonnet', effort: 'low', live: false });
+    await manager.action(s.id, { type: 'send', text: '再開' });
+    expect(driver.starts[1]).toMatchObject({ model: 'sonnet', effort: 'low' });
+    store.close();
   });
 });
 

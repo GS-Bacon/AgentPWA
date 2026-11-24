@@ -1,6 +1,7 @@
 // イベント列から、会話の表示用の項目を組み立てる。
 import type { ApprovalDecision, DriverEvent, PermissionMode, SessionEvent } from '@agentpwa/shared';
 import { MODE_LABEL } from './format.ts';
+import { EFFORT_LABEL } from './models.ts';
 
 type ApprovalEv = Extract<DriverEvent, { type: 'approval_request' }>;
 type QuestionEv = Extract<DriverEvent, { type: 'question' }>;
@@ -29,6 +30,8 @@ export function buildItems(events: SessionEvent[]): Item[] {
   const approvalIndex = new Map<string, number>();
   const questionIndex = new Map<string, number>();
   let mode: PermissionMode | undefined;
+  /** 直前のモデルとエフォート（'model|effort'） */
+  let model: string | undefined;
 
   for (const ev of events) {
     switch (ev.type) {
@@ -110,6 +113,19 @@ export function buildItems(events: SessionEvent[]): Item[] {
         if (mode !== undefined && ev.mode !== mode) items.push({ kind: 'note', key: `m${ev.seq}`, text: `権限モードを「${MODE_LABEL[ev.mode]}」にしました` });
         mode = ev.mode;
         break;
+      case 'model': {
+        // こちらも起動・再開のたびに届くので、変わったときだけ出す
+        const next = `${ev.model ?? ''}|${ev.effort ?? ''}`;
+        if (model !== undefined && next !== model) {
+          const parts: string[] = [];
+          const [prevModel, prevEffort] = model.split('|');
+          if ((ev.model ?? '') !== prevModel) parts.push(`モデルを「${ev.model ?? '既定'}」`);
+          if ((ev.effort ?? '') !== prevEffort) parts.push(`エフォートを「${ev.effort ? EFFORT_LABEL[ev.effort] : '既定'}」`);
+          items.push({ kind: 'note', key: `md${ev.seq}`, text: `${parts.join('、')}にしました` });
+        }
+        model = next;
+        break;
+      }
       default:
         break;
     }

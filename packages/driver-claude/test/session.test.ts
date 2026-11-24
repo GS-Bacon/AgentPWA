@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import type { DriverEvent, PermissionMode } from '@agentpwa/shared';
+import type { DriverEvent, PermissionMode, StartOptions } from '@agentpwa/shared';
 import type { LaunchSpec, ProcessLauncher } from '../src/launcher.ts';
 import { ClaudeSession } from '../src/session.ts';
 import { createClaudeDriver } from '../src/index.ts';
@@ -37,7 +37,7 @@ class FakeCli extends EventEmitter {
   }
 }
 
-function setup(mode: PermissionMode = 'ask') {
+function setup(mode: PermissionMode = 'ask', extra: Partial<StartOptions> = {}) {
   const clis: FakeCli[] = [];
   const specs: LaunchSpec[] = [];
   const launcher: ProcessLauncher = {
@@ -53,7 +53,7 @@ function setup(mode: PermissionMode = 'ask') {
     remove: async () => {},
   };
   const events: DriverEvent[] = [];
-  const session = new ClaudeSession({ sessionId: 's1', cwd: '/w', permissionMode: mode }, (e) => events.push(e), { launcher, claudePath: 'claude', env: {} });
+  const session = new ClaudeSession({ sessionId: 's1', cwd: '/w', permissionMode: mode, ...extra },(e) => events.push(e), { launcher, claudePath: 'claude', env: {} });
   return { session, events, clis, specs };
 }
 
@@ -150,6 +150,76 @@ describe('ClaudeSession（stdio の制御メッセージ）', () => {
     expect(events.at(-1)).toEqual({ type: 'permission_mode', mode: 'plan' });
     await session.send({ type: 'send', text: 'x' });
     expect(specs[0].args[specs[0].args.indexOf('--permission-mode') + 1]).toBe('plan');
+  });
+
+  it('起動時のモデルとエフォートを知らせ、--model / --effort で起動する', async () => {
+    const { session, events, specs } = setup('ask', { model: 'opus', effort: 'high' });
+    await session.init();
+    expect(events[1]).toEqual({ type: 'model', model: 'opus', effort: 'high' });
+    await session.send({ type: 'send', text: 'x' });
+    const args = specs[0].args;
+    expect(args[args.indexOf('--model') + 1]).toBe('opus');
+    expect(args[args.indexOf('--effort') + 1]).toBe('high');
+  });
+
+  it('実行中の set_model は set_model と apply_flag_settings の制御要求で送り、反映後に model を出す', async () => {
+    const { session, events, clis } = setup();
+    await session.init();
+    await session.send({ type: 'send', text: 'x' });
+    const cli = clis[0];
+    const p = session.send({ type: 'set_model', model: 'sonnet', effort: 'max' });
+    await tick();
+    const r1 = cli.written.at(-1);
+    expect(r1).toMatchObject({ type: 'control_request', request: { subtype: 'set_model', model: 'sonnet' } });
+    cli.out({ type: 'control_response', response: { subtype: 'success', request_id: r1.request_id } });
+    await tick();
+    const r2 = cli.written.at(-1);
+    expect(r2).toMatchObject({ type: 'control_request', request: { subtype: 'apply_flag_settings', settings: { effortLevel: 'max' } } });
+    cli.out({ type: 'control_response', response: { subtype: 'success', request_id: r2.request_id } });
+    await p;
+    expect(events.at(-1)).toEqual({ type: 'model', model: 'sonnet', effort: 'max' });
+  });
+
+  it('既定に戻すときは model を省き、effortLevel は null にする', async () => {
+    const { session, clis } = setup('ask', { model: 'opus', effort: 'low' });
+    await session.init();
+    await session.send({ type: 'send', text: 'x' });
+    const cli = clis[0];
+    const p = session.send({ type: 'set_model', model: null, effort: null });
+    await tick();
+    const r1 = cli.written.at(-1);
+    expect(r1.request).toEqual({ subtype: 'set_model' });
+    cli.out({ type: 'control_response', response: { subtype: 'success', request_id: r1.request_id } });
+    await tick();
+    const r2 = cli.written.at(-1);
+    expect(r2.request).toEqual({ subtype: 'apply_flag_settings', settings: { effortLevel: null } });
+    cli.out({ type: 'control_response', response: { subtype: 'success', request_id: r2.request_id } });
+    await p;
+  });
+
+  it('モデルの切り替えに失敗したら error を出し、元のモデルのままにする', async () => {
+    const { session, events, clis } = setup('ask', { model: 'opus' });
+    await session.init();
+    await session.send({ type: 'send', text: 'x' });
+    const cli = clis[0];
+    const p = session.send({ type: 'set_model', model: 'nope' });
+    await tick();
+    const r = cli.written.at(-1);
+    cli.out({ type: 'control_response', response: { subtype: 'error', request_id: r.request_id, error: 'unknown model' } });
+    await p;
+    expect(events.at(-2)).toMatchObject({ type: 'error', fatal: false });
+    expect(events.at(-1)).toEqual({ type: 'model', model: 'opus' });
+  });
+
+  it('プロセスが無いときの切り替えは、次の起動の --model / --effort に使う', async () => {
+    const { session, events, specs } = setup();
+    await session.init();
+    await session.send({ type: 'set_model', model: 'haiku', effort: 'xhigh' });
+    expect(events.at(-1)).toEqual({ type: 'model', model: 'haiku', effort: 'xhigh' });
+    await session.send({ type: 'send', text: 'x' });
+    const args = specs[0].args;
+    expect(args[args.indexOf('--model') + 1]).toBe('haiku');
+    expect(args[args.indexOf('--effort') + 1]).toBe('xhigh');
   });
 
   it('計画モードの終了など、CLI 自身による変更も permission_mode にする', async () => {

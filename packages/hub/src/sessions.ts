@@ -1,7 +1,7 @@
 // セッション管理: Driver の起動・停止・再開、イベントの採番・保存・配信。
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { PERMISSION_MODES, type AgentDriver, type AgentKind, type AuthCheck, type DriverEvent, type DriverSession, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
+import { EFFORT_LEVELS, PERMISSION_MODES, type AgentDriver, type AgentKind, type AuthCheck, type DriverEvent, type DriverSession, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
 import type { CreateSessionRequest, DeleteSessionResult, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { findAllowedFolder, isModeAllowed, type HubConfig } from './config.ts';
 import type { Store } from './db.ts';
@@ -18,7 +18,14 @@ export class HttpError extends Error {
 
 const AUTH_CACHE_MS = 60_000;
 
-const FULL_AUTO_DENIED = '「すべて自動」は、このプロジェクトでは許可されていません（設定ファイルの folders で allowFullAuto: true にしたプロジェクトだけで使えます）';
+const MODEL_INVALID = 'モデル名が正しくありません（英数字と . _ - : [ ] だけ、100文字まで）';
+
+/** モデル名（エイリアスか正式名）。CLI の引数に渡すので、使える文字を絞る */
+function isModelName(v: string): boolean {
+  return /^[A-Za-z0-9._:[\]-]{1,100}$/.test(v);
+}
+
+const FULL_AUTO_DENIED ='「すべて自動」は、このプロジェクトでは許可されていません（設定ファイルの folders で allowFullAuto: true にしたプロジェクトだけで使えます）';
 
 export interface SessionManagerEvents {
   session: [SessionSummary];
@@ -116,6 +123,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const permissionMode = req.permissionMode ?? folder.defaultPermissionMode ?? 'ask';
     if (!PERMISSION_MODES.includes(permissionMode)) throw new HttpError(400, '権限モードが正しくありません');
     if (!isModeAllowed(this.config, folder.path, permissionMode)) throw new HttpError(403, FULL_AUTO_DENIED);
+    const model = req.model?.trim() || undefined;
+    if (model !== undefined && !isModelName(model)) throw new HttpError(400, MODEL_INVALID);
+    if (req.effort !== undefined && !EFFORT_LEVELS.includes(req.effort)) throw new HttpError(400, 'エフォートが正しくありません');
     const auth = await this.checkAuth(agent, true);
     if (!auth.ok || auth.auth === 'api_key') {
       throw new HttpError(409, auth.detail ?? '認証を確認できないため起動しません');
@@ -127,7 +137,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       title: req.title?.trim() || titleFromPrompt(req.prompt),
       cwd: folder.path,
       folderName: folder.name,
-      model: req.model || undefined,
+      model,
+      effort: req.effort,
       permissionMode,
       now,
     });
@@ -155,6 +166,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   async action(id: string, action: UserAction): Promise<void> {
     const rec = this.mustGet(id);
     if (action.type === 'set_permission_mode') return this.setPermissionMode(id, action.mode);
+    if (action.type === 'set_model') return this.setModel(id, action);
     let s = this.live.get(id);
     if (!s) {
       if (action.type === 'interrupt') return;
@@ -189,6 +201,44 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     try {
       // 反映できたら Driver が permission_mode を送る。できなければ error（fatal: false）が届き、モードは変わらない
       await s.send({ type: 'set_permission_mode', mode });
+    } catch (e) {
+      throw new HttpError(409, (e as Error).message);
+    }
+  }
+
+  /**
+   * モデルとエフォートを切り替える（省略は変えない、null は既定に戻す）。
+   * 動いていないセッションは Hub が覚えておき、次に起動・再開するときに渡す。
+   */
+  private async setModel(id: string, action: Extract<UserAction, { type: 'set_model' }>): Promise<void> {
+    const rec = this.mustGet(id);
+    const a: Extract<UserAction, { type: 'set_model' }> = { type: 'set_model' };
+    if (action.model !== undefined) {
+      const m = action.model?.trim() || null;
+      if (m !== null && !isModelName(m)) throw new HttpError(400, MODEL_INVALID);
+      a.model = m;
+    }
+    if (action.effort !== undefined) {
+      if (action.effort !== null && !EFFORT_LEVELS.includes(action.effort)) throw new HttpError(400, 'エフォートが正しくありません');
+      a.effort = action.effort;
+    }
+    let s = this.live.get(id);
+    if (!s) {
+      const pending = this.starting.get(id);
+      if (pending) s = await pending.catch(() => undefined);
+    }
+    if (!s) {
+      const model = a.model === undefined ? rec.model : a.model ?? undefined;
+      const effort = a.effort === undefined ? rec.effort : a.effort ?? undefined;
+      const ev: DriverEvent = { type: 'model' };
+      if (model) ev.model = model;
+      if (effort) ev.effort = effort;
+      this.record(id, ev);
+      return;
+    }
+    try {
+      // 反映できたら Driver が model を送る。できなければ error（fatal: false）が届き、設定は変わらない
+      await s.send(a);
     } catch (e) {
       throw new HttpError(409, (e as Error).message);
     }
@@ -313,6 +363,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             sessionId: id,
             cwd: rec.cwd,
             model: rec.model,
+            effort: rec.effort,
             permissionMode,
             initialPrompt,
             resumeToken: rec.resumeToken,

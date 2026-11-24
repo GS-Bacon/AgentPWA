@@ -4,7 +4,7 @@ import path from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
-import { PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
+import { EFFORT_LEVELS, PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type EffortLevel, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
 import type { CreateSessionRequest, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
@@ -33,6 +33,10 @@ function isMode(v: unknown): v is PermissionMode {
   return typeof v === 'string' && (PERMISSION_MODES as readonly string[]).includes(v);
 }
 
+function isEffort(v: unknown): v is EffortLevel {
+  return typeof v === 'string' && (EFFORT_LEVELS as readonly string[]).includes(v);
+}
+
 function parseAction(body: unknown): UserAction {
   const b = (body ?? {}) as Record<string, unknown>;
   switch (b.type) {
@@ -50,6 +54,16 @@ function parseAction(body: unknown): UserAction {
     case 'set_permission_mode':
       if (!isMode(b.mode)) break;
       return { type: 'set_permission_mode', mode: b.mode };
+    case 'set_model': {
+      // 省略は「変えない」、null は「既定に戻す」。形の確認だけここで行い、値の確認は SessionManager が行う
+      if (b.model !== undefined && b.model !== null && typeof b.model !== 'string') break;
+      if (b.effort !== undefined && b.effort !== null && !isEffort(b.effort)) break;
+      if (b.model === undefined && b.effort === undefined) break;
+      const a: UserAction = { type: 'set_model' };
+      if (b.model !== undefined) a.model = b.model as string | null;
+      if (b.effort !== undefined) a.effort = b.effort as EffortLevel | null;
+      return a;
+    }
   }
   throw new HttpError(400, '操作の形が正しくありません');
 }
@@ -102,10 +116,12 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     if (typeof b.cwd !== 'string') throw new HttpError(400, 'フォルダを指定してください');
     // 省略時はプロジェクトの既定のモード。full_auto の可否は SessionManager が確かめる
     if (b.permissionMode !== undefined && !isMode(b.permissionMode)) throw new HttpError(400, '権限モードが正しくありません');
+    if (b.effort !== undefined && !isEffort(b.effort)) throw new HttpError(400, 'エフォートが正しくありません');
     return manager.create({
       agent: b.agent,
       cwd: b.cwd,
       model: typeof b.model === 'string' ? b.model : undefined,
+      effort: b.effort,
       permissionMode: b.permissionMode,
       prompt: typeof b.prompt === 'string' ? b.prompt : undefined,
       title: typeof b.title === 'string' ? b.title : undefined,

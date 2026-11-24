@@ -1,28 +1,18 @@
 // 新しいセッションの作成フォーム（iPhone は全画面、iPad / Web はダイアログ）。
 // プロジェクト（作業フォルダ）と AI を選んで始める。
 import { useState } from 'react';
-import { PERMISSION_MODES, type AgentKind, type PermissionMode } from '@agentpwa/shared';
+import { PERMISSION_MODES, type AgentKind, type EffortLevel, type PermissionMode } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { showToast, useStore } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL, MODE_NOTE } from '../lib/format.ts';
 import { confirmFullAuto } from '../lib/sessionActions.ts';
+import { EFFORTS, EFFORT_LABEL, MODELS } from '../lib/models.ts';
 import { AgentIcon, IconClose } from './Icons.tsx';
-
-const MODELS: Record<AgentKind, { value: string; label: string }[]> = {
-  claude: [
-    { value: '', label: '既定' },
-    { value: 'opus', label: 'Opus' },
-    { value: 'sonnet', label: 'Sonnet' },
-    { value: 'fable', label: 'Fable' },
-    { value: 'haiku', label: 'Haiku' },
-  ],
-  codex: [{ value: '', label: '既定' }],
-};
 
 const LAST_KEY = 'agentpwa.newSession.v1';
 
-function loadLast(): { cwd?: string; model?: string } {
+function loadLast(): { cwd?: string; model?: string; effort?: EffortLevel } {
   try {
     return JSON.parse(localStorage.getItem(LAST_KEY) ?? '{}');
   } catch {
@@ -55,10 +45,13 @@ export function NewSessionForm({
   // 権限モードの既定はプロジェクトの設定（defaultPermissionMode）。なければ「毎回確認」
   const defaultMode = (p: string): PermissionMode => folders.find((f) => f.path === p)?.defaultPermissionMode ?? 'ask';
   const [model, setModel] = useState(agent === 'claude' ? last.model ?? '' : '');
+  // エフォートは空文字が「既定」
+  const [effort, setEffort] = useState<EffortLevel | ''>(last.effort && EFFORTS[agent].includes(last.effort) ? last.effort : '');
   const setCwd = (p: string) => {
     setCwdState(p);
     const a = folders.find((f) => f.path === p)?.agent ?? 'claude';
     if (!MODELS[a].some((m) => m.value === model)) setModel('');
+    if (effort && !EFFORTS[a].includes(effort)) setEffort('');
     setMode(defaultMode(p));
   };
   const [mode, setMode] = useState<PermissionMode>(() => defaultMode(cwd));
@@ -76,9 +69,9 @@ export function NewSessionForm({
     if (!cwd || busy) return;
     setBusy(true);
     try {
-      const s = await api.create({ cwd, model: model || undefined, permissionMode: mode, prompt: prompt.trim() || undefined });
+      const s = await api.create({ cwd, model: model || undefined, effort: effort || undefined, permissionMode: mode, prompt: prompt.trim() || undefined });
       try {
-        localStorage.setItem(LAST_KEY, JSON.stringify({ cwd, model }));
+        localStorage.setItem(LAST_KEY, JSON.stringify({ cwd, model, effort: effort || undefined }));
       } catch {
         /* noop */
       }
@@ -140,6 +133,17 @@ export function NewSessionForm({
           </select>
         </label>
         <label className="field">
+          エフォート
+          <select className="select" value={effort} onChange={(e) => setEffort(e.target.value as EffortLevel | '')}>
+            <option value="">既定</option>
+            {EFFORTS[agent].map((e) => (
+              <option key={e} value={e}>
+                {EFFORT_LABEL[e]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field" style={{ gridColumn: '1 / -1' }}>
           権限モード
           <select className="select" value={mode} onChange={(e) => void pickMode(e.target.value as PermissionMode)} style={mode === 'full_auto' ? { color: 'var(--attention)' } : undefined}>
             {PERMISSION_MODES.map((m) => (

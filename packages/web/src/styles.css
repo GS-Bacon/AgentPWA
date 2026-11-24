@@ -205,7 +205,8 @@ kbd {
   display: flex; flex-direction: column; gap: 6px;
 }
 .composer-meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--fg-muted); flex-wrap: wrap; }
-.composer-meta .tag { height: 24px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border); display: inline-flex; align-items: center; }
+/* モデルとエフォートのボタン（入力欄の上） */
+.meta-btn { height: 24px; padding: 0 8px; font-size: 12px; gap: 4px; max-width: 100%; color: var(--fg-muted); }
 .composer-row { display: flex; gap: 8px; align-items: flex-end; }
 .composer-row .textarea { flex: 1 1 auto; min-height: 40px; max-height: 160px; padding: 9px 12px; }
 
@@ -259,6 +260,8 @@ kbd {
 .menu-check { width: 12px; flex: none; color: var(--fg); }
 .menu-note { font-size: 11px; color: var(--fg-muted); white-space: normal; line-height: 1.4; }
 .menu .menu-mode:disabled .menu-note { color: var(--fg-faint); }
+.menu-head { padding: 6px 14px 2px; font-size: 11px; color: var(--fg-muted); }
+.menu-sep { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 8px; }
 .menu-foot { padding: 6px 14px 4px; margin-top: 4px; border-top: 1px solid var(--border); font-size: 11px; color: var(--fg-muted); }
 
 /* 権限モードのボタン（入力欄の左） */
