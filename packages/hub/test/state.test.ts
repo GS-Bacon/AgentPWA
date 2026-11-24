@@ -3,7 +3,7 @@ import type { DriverEvent, SessionEvent } from '@agentpwa/shared';
 import { applyEvent, isUnread, markRead, newRecord, rankOf, recoverAfterRestart, sortRecords, titleFromPrompt, type SessionRecord } from '../src/state.ts';
 
 function rec(id = 's1', now = '2026-11-24T00:00:00.000Z'): SessionRecord {
-  return newRecord({ id, agent: 'claude', title: 't', cwd: 'C:\\w', folderName: 'w', permissionMode: 'ask', now });
+  return newRecord({ id, agent: 'claude', title: 't', cwd: 'C:\\w', folderName: 'w', permissionMode: 'ask', now, started: true });
 }
 
 /** イベント列を順に適用する（seq と時刻は自動で振る）。 */

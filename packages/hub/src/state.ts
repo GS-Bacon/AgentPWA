@@ -26,6 +26,13 @@ export interface SessionRecord {
   /** 最後にターンが終わった（idle になった）位置。readSeq より後なら「完了・未読」 */
   turnEndSeq: number;
   archived: boolean;
+  /**
+   * 一度でも書き込まれたか（最初の指示・送信・名前の変更）。false のままのセッションは「空」とみなし、
+   * 画面で閉じたときや Hub の起動時に消す。古い記録には無いので、読み込み時に補う（normalizeRecord）
+   */
+  started: boolean;
+  /** このセッションを作った AI のセッション（AI が Hub の API で作ったときだけ） */
+  parentSessionId?: string;
   activity?: string;
   lastError?: string;
   pendingApprovals: ApprovalRequest[];
@@ -46,6 +53,8 @@ export function newRecord(p: {
   effort?: EffortLevel;
   permissionMode: PermissionMode;
   now: string;
+  started: boolean;
+  parentSessionId?: string;
 }): SessionRecord {
   return {
     ...p,
@@ -124,7 +133,10 @@ export function applyEvent(rec: SessionRecord, ev: SessionEvent): SessionRecord 
     case 'message':
       if (ev.role === 'assistant') r.activity = oneLine(ev.text);
       // 最初の指示なしで始めたセッションは、最初のユーザー発言を名前にする
-      else if (rec.title === DEFAULT_TITLE) r.title = titleFromPrompt(ev.text);
+      else {
+        r.started = true;
+        if (rec.title === DEFAULT_TITLE) r.title = titleFromPrompt(ev.text);
+      }
       break;
     case 'error':
       r.lastError = ev.message;
@@ -133,6 +145,17 @@ export function applyEvent(rec: SessionRecord, ev: SessionEvent): SessionRecord 
       break;
   }
   return r;
+}
+
+/** 何も書き込まれていない（空の）セッションか */
+export function isEmptySession(rec: Pick<SessionRecord, 'started'>): boolean {
+  return !rec.started;
+}
+
+/** 保存済みの記録を今の形にそろえる（started が無い古い記録は、名前が既定のままなら空とみなす） */
+export function normalizeRecord(rec: SessionRecord): SessionRecord {
+  if (typeof rec.started === 'boolean') return rec;
+  return { ...rec, started: rec.title !== DEFAULT_TITLE };
 }
 
 export function isUnread(rec: Pick<SessionRecord, 'status' | 'turnEndSeq' | 'readSeq'>): boolean {
@@ -217,6 +240,8 @@ export function toSummary(rec: SessionRecord, extra: { machine: string; live: bo
     resumable: Boolean(rec.resumeToken),
     live: extra.live,
     archived: rec.archived,
+    empty: isEmptySession(rec),
+    parentSessionId: rec.parentSessionId,
     activity: rec.activity,
     lastError: rec.lastError,
     pendingApprovals: rec.pendingApprovals,

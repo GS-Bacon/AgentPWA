@@ -292,3 +292,38 @@ describe('deleteHistory', () => {
     await expect(driver.deleteHistory!({ cwd: '/home/me/app', resumeToken: '../../etc' })).rejects.toThrow();
   });
 });
+
+describe('AI からのセッション作成（hub-guide）', () => {
+  function launch(env: NodeJS.ProcessEnv) {
+    const specs: LaunchSpec[] = [];
+    const launcher: ProcessLauncher = {
+      os: 'linux',
+      homeDir: async () => '/home/me',
+      spawn(spec) {
+        specs.push(spec);
+        return new FakeCli() as unknown as ChildProcessWithoutNullStreams;
+      },
+      run: async () => ({ code: 0, stdout: '', stderr: '' }),
+      remove: async () => {},
+    };
+    const session = new ClaudeSession({ sessionId: 'hub-s1', cwd: '/w', permissionMode: 'ask' }, () => {}, { launcher, claudePath: 'claude', env, resolveDefaults: false });
+    return { session, specs };
+  }
+
+  it('Hub の URL があれば、セッション ID を環境変数で渡し、作り方をシステムプロンプトに足す', async () => {
+    const { session, specs } = launch({ AGENTPWA_HUB_URL: 'http://127.0.0.1:8787' });
+    await session.init();
+    await session.send({ type: 'send', text: 'hi' });
+    expect(specs[0].env.AGENTPWA_SESSION_ID).toBe('hub-s1');
+    const args = specs[0].args;
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toContain('X-AgentPWA-Session: $AGENTPWA_SESSION_ID');
+  });
+
+  it('Hub の URL が無ければ何も足さない', async () => {
+    const { session, specs } = launch({});
+    await session.init();
+    await session.send({ type: 'send', text: 'hi' });
+    expect(specs[0].env.AGENTPWA_SESSION_ID).toBeUndefined();
+    expect(specs[0].args).not.toContain('--append-system-prompt');
+  });
+});

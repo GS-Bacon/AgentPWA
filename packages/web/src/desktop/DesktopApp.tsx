@@ -4,7 +4,7 @@
 // 画面に収まらないときは横スクロール（iPad は横スワイプ）で表示する。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.ts';
-import { getState, onSessionsClosed, run, sortedSessions, useStore } from '../lib/store.ts';
+import { discardIfEmpty, getState, onSessionCreatedByAgent, onSessionsClosed, run, sortedSessions, useStore } from '../lib/store.ts';
 import { isRunning } from '../lib/format.ts';
 import type { ArchiveSectionProps } from '../App.tsx';
 import { DRAG_TYPE, isWaiting, Rail, Sidebar } from './Sidebar.tsx';
@@ -17,6 +17,7 @@ import {
   isEmptyPane,
   movePane,
   openSession,
+  openSessionInNewPane,
   openViewer,
   resizeWeights,
   setPaneSession,
@@ -382,6 +383,26 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
     return onSessionsClosed((ids) => closeFor(new Set(ids)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // AI が作ったセッションは、新しいペインで開く
+  useEffect(
+    () =>
+      onSessionCreatedByAgent((id) => {
+        setMaximized(null);
+        update((l) => openSessionInNewPane(l, id));
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  // ペインから外れたセッション（閉じた・別のセッションに切り替えた）が空なら消す
+  const shownRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const shown = new Set(layout.panes.map(paneSession).filter((id): id is string => !!id));
+    const prev = shownRef.current;
+    shownRef.current = shown;
+    if (prev) discardIfEmpty([...prev].filter((id) => !shown.has(id)));
+  }, [layout.panes]);
 
   // 会話の中のパスをタップしたら、ビュワーのペインで開く
   useEffect(

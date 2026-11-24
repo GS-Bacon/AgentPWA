@@ -5,7 +5,7 @@ import { DEFAULT_PERMISSION_MODE, EFFORT_LEVELS, PERMISSION_MODES, type AgentDri
 import type { CreateSessionRequest, DeleteSessionResult, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { findAllowedFolder, isModeAllowed, type HubConfig } from './config.ts';
 import type { Store } from './db.ts';
-import { applyEvent, markRead, newRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
+import { applyEvent, isEmptySession, markRead, newRecord, normalizeRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
 
 export class HttpError extends Error {
   constructor(
@@ -60,7 +60,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   /** 保存済みのセッションを読み込み、前回の Hub で作業中だったものを stopped にする。 */
   init(): void {
-    for (const rec of this.store.loadSessions()) {
+    for (const loaded of this.store.loadSessions()) {
+      const rec = normalizeRecord(loaded);
+      // 前回、何も書き込まれないまま残った空のセッションは消す
+      if (isEmptySession(rec)) {
+        this.store.deleteSession(rec.id);
+        continue;
+      }
       rec.lastSeq = Math.max(rec.lastSeq, this.store.maxSeq(rec.id));
       this.records.set(rec.id, rec);
       const fix = recoverAfterRestart(rec);
@@ -154,8 +160,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   // ---- 操作 ----
 
-  async create(req: CreateSessionRequest): Promise<SessionSummary> {
-    const folder = findAllowedFolder(this.config, req.cwd);
+  /**
+   * セッションを作る。parentSessionId は、AI が Hub の API で作ったときの作成元のセッション
+   * （Driver が子プロセスに渡した AGENTPWA_SESSION_ID）。作成元があれば、cwd を省いたときは作成元と同じフォルダにする。
+   */
+  async create(req: CreateSessionRequest, parentSessionId?: string): Promise<SessionSummary> {
+    const parent = parentSessionId ? this.records.get(parentSessionId) : undefined;
+    if (parentSessionId && !parent) throw new HttpError(400, '作成元のセッションが見つかりません');
+    const folder = findAllowedFolder(this.config, req.cwd || parent?.cwd || '');
     if (!folder) throw new HttpError(403, 'このフォルダは許可リストに入っていません');
     // AI はプロジェクト（作業フォルダ）ごとに設定ファイルで決めてある
     const agent = folder.agent;
@@ -165,6 +177,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const permissionMode = req.permissionMode ?? folder.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE;
     if (!PERMISSION_MODES.includes(permissionMode)) throw new HttpError(400, '権限モードが正しくありません');
     if (!isModeAllowed(this.config, folder.path, permissionMode)) throw new HttpError(403, FULL_AUTO_DENIED);
+    // AI が作るセッションは、作成元より確認を減らせない（「すべて自動」は作成元も「すべて自動」のときだけ）
+    if (parent && permissionMode === 'full_auto' && parent.permissionMode !== 'full_auto') {
+      throw new HttpError(403, '作成元のセッションが「すべて自動」でないため、「すべて自動」のセッションは作れません');
+    }
     const model = req.model?.trim() || undefined;
     if (model !== undefined && !isModelName(model)) throw new HttpError(400, MODEL_INVALID);
     if (req.effort !== undefined && !EFFORT_LEVELS.includes(req.effort)) throw new HttpError(400, 'エフォートが正しくありません');
@@ -183,6 +199,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       effort: req.effort,
       permissionMode,
       now,
+      // 最初の指示か名前があれば、空のセッションではない
+      started: Boolean(req.prompt?.trim() || req.title?.trim()),
+      parentSessionId: parent?.id,
     });
     this.records.set(rec.id, rec);
     this.store.saveSession(rec);
@@ -199,10 +218,24 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return this.get(id);
   }
 
+  /** 止める。空のセッション（何も書き込まれていない）は、止めずにそのまま消す */
   async stop(id: string): Promise<SessionSummary> {
     this.mustGet(id);
     await this.halt(id);
-    return this.get(id);
+    const sum = this.get(id);
+    await this.discardIfEmpty(id);
+    return sum;
+  }
+
+  /**
+   * 空のセッション（何も書き込まれていない）なら消す。画面でペインを閉じた・別のセッションに切り替えたときに Web が呼ぶ。
+   * 書き込みがあれば何もしない。消したら true
+   */
+  async discardIfEmpty(id: string): Promise<boolean> {
+    const rec = this.records.get(id);
+    if (!rec || !isEmptySession(rec)) return false;
+    await this.remove(id);
+    return true;
   }
 
   async action(id: string, action: UserAction): Promise<void> {
@@ -315,11 +348,20 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (patch.archived === true && !first.archived) await this.halt(id);
     const rec = this.mustGet(id);
     const next: SessionRecord = { ...rec };
-    if (typeof patch.title === 'string' && patch.title.trim()) next.title = patch.title.trim().slice(0, 100);
+    if (typeof patch.title === 'string' && patch.title.trim()) {
+      next.title = patch.title.trim().slice(0, 100);
+      // 名前を付けたら、空のセッションとしては消さない
+      next.started = true;
+    }
     if (typeof patch.archived === 'boolean') next.archived = patch.archived;
     this.records.set(id, next);
     this.store.saveSession(next);
     const sum = this.summary(next);
+    // 空のセッションはアーカイブせずに消す
+    if (next.archived && isEmptySession(next)) {
+      await this.remove(id);
+      return sum;
+    }
     this.emit('session', sum);
     return sum;
   }

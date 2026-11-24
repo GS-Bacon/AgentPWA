@@ -3,7 +3,7 @@
 // セッションの詳細へは1画面ずつ遷移する。
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionSummary } from '@agentpwa/hub/api';
-import { onSessionsClosed, sortedSessions, useStore, waitingCount } from '../lib/store.ts';
+import { discardIfEmpty, onSessionCreatedByAgent, onSessionsClosed, sortedSessions, useStore, waitingCount } from '../lib/store.ts';
 import type { ArchiveSectionProps } from '../App.tsx';
 import { elapsed, shortPath, timeLabel } from '../lib/format.ts';
 import { archivedSessions, buildProjects, findProject, type Project } from '../lib/projects.ts';
@@ -439,6 +439,16 @@ export function PhoneApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProps)
   );
   // 会話の中のパスをタップしたら、全画面のビュワーを重ねて開く（戻るで会話に戻る）
   useEffect(() => onOpenFile((sid, path) => goRef.current(`#/f/${sid}?path=${encodeURIComponent(path)}`)), []);
+  // AI が作ったセッションは、その会話の画面を開く（戻るで元の画面に戻る）
+  useEffect(() => onSessionCreatedByAgent((id) => goRef.current(`#/s/${id}`)), []);
+  // 表示していたセッションから離れたとき（一覧に戻った・別のセッションを開いた）、空なら消す
+  const shownId = route.name === 'session' || route.name === 'file' ? route.id : null;
+  const prevShown = useRef(shownId);
+  useEffect(() => {
+    const prev = prevShown.current;
+    prevShown.current = shownId;
+    if (prev && prev !== shownId) discardIfEmpty([prev]);
+  }, [shownId]);
 
   if (route.name === 'session') return <DetailScreen id={route.id} back={back} />;
   if (route.name === 'file') {

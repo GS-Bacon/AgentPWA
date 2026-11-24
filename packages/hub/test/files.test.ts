@@ -160,3 +160,23 @@ describe('Origin の確認', () => {
     expect(checkOrigin('DELETE', '/api/sessions/x', { host: HOST, origin: 'https://evil.example.com' }).ok).toBe(false);
   });
 });
+
+describe('AI からのセッション作成と空のセッション（HTTP）', () => {
+  const postJson = (url: string, payload: unknown, headers: Record<string, string> = {}) =>
+    app.inject({ method: 'POST', url, headers: { ...H, 'content-type': 'application/json', ...headers }, payload: JSON.stringify(payload) });
+
+  it('X-AgentPWA-Session を付けると cwd を省けて、作成元が記録される', async () => {
+    const r = await postJson('/api/sessions', { prompt: '別の作業' }, { 'x-agentpwa-session': sid });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ parentSessionId: sid, cwd: proj, empty: false });
+    // 作成元なしで cwd を省くと 400
+    expect((await postJson('/api/sessions', { prompt: 'x' })).statusCode).toBe(400);
+  });
+
+  it('discard は空のセッションだけを消す', async () => {
+    const full = (await postJson('/api/sessions', { cwd: proj, prompt: 'hi' })).json() as { id: string };
+    expect((await postJson(`/api/sessions/${full.id}/discard`, {})).json()).toEqual({ removed: false });
+    expect((await postJson(`/api/sessions/${sid}/discard`, {})).json()).toEqual({ removed: true });
+    expect((await get(`/api/sessions/${sid}`)).statusCode).toBe(404);
+  });
+});

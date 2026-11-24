@@ -36,6 +36,9 @@ async function main(): Promise<void> {
   fs.mkdirSync(config.dataDir, { recursive: true });
   const store = new Store(path.join(config.dataDir, 'hub.db'));
 
+  // セッションの中の AI が Hub の API を呼べるよう、子プロセスに URL を伝える（driver-claude の hub-guide.ts）
+  process.env.AGENTPWA_HUB_URL = `http://${HOST}:${config.port}`;
+
   const codex = await loadCodexDriver(config.codex);
   const drivers = new Map<AgentKind, AgentDriver>([
     ['claude', createClaudeDriver({ claudePath: config.claudePath })],

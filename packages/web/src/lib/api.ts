@@ -40,6 +40,8 @@ export const api = {
   create: (body: CreateSessionRequest) => req<SessionSummary>('POST', '/api/sessions', body),
   resume: (id: string) => req<SessionSummary>('POST', `/api/sessions/${id}/resume`),
   stop: (id: string) => req<SessionSummary>('POST', `/api/sessions/${id}/stop`),
+  /** 空のセッション（何も書き込まれていない）なら消す。書き込みがあれば何もしない */
+  discard: (id: string) => req<{ removed: boolean }>('POST', `/api/sessions/${id}/discard`),
   read: (id: string, seq: number) => req<SessionSummary>('POST', `/api/sessions/${id}/read`, { seq }),
   action: (id: string, action: UserAction) => req<{ ok: true }>('POST', `/api/sessions/${id}/action`, action),
   /** 入力欄のスラッシュコマンドの補完（Hub が CLI に聞くので、初回は数秒かかる） */

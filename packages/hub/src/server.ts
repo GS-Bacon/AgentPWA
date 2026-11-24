@@ -163,23 +163,29 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
 
   app.post('/api/sessions', async (req) => {
     const b = (req.body ?? {}) as Partial<CreateSessionRequest>;
+    // AI がセッションの中から作るときは、作成元のセッションを X-AgentPWA-Session で渡す（docs/architecture.md「AI からのセッション作成」）
+    const parentHeader = req.headers['x-agentpwa-session'];
+    const parent = (Array.isArray(parentHeader) ? parentHeader[0] : parentHeader)?.trim() || undefined;
     if (b.agent !== undefined && !AGENTS.includes(b.agent)) throw new HttpError(400, 'agent が正しくありません');
-    if (typeof b.cwd !== 'string') throw new HttpError(400, 'フォルダを指定してください');
+    if (typeof b.cwd !== 'string' && !(parent && b.cwd === undefined)) throw new HttpError(400, 'フォルダを指定してください');
     // 省略時はプロジェクトの既定のモード。full_auto の可否は SessionManager が確かめる
     if (b.permissionMode !== undefined && !isMode(b.permissionMode)) throw new HttpError(400, '権限モードが正しくありません');
     if (b.effort !== undefined && !isEffort(b.effort)) throw new HttpError(400, 'エフォートが正しくありません');
     return manager.create({
       agent: b.agent,
-      cwd: b.cwd,
+      cwd: b.cwd ?? '',
       model: typeof b.model === 'string' ? b.model : undefined,
       effort: b.effort,
       permissionMode: b.permissionMode,
       prompt: typeof b.prompt === 'string' ? b.prompt : undefined,
       title: typeof b.title === 'string' ? b.title : undefined,
-    });
+    }, parent);
   });
 
   app.get<{ Params: { id: string } }>('/api/sessions/:id', async (req) => manager.get(req.params.id));
+
+  // 空のセッション（何も書き込まれていない）なら消す。Web がペインを閉じたとき・別のセッションに切り替えたときに呼ぶ
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/discard', async (req) => ({ removed: await manager.discardIfEmpty(req.params.id) }));
 
   // 名前の変更とアーカイブ・解除（アーカイブするときは、動いているセッションを先に止める）
   app.patch<{ Params: { id: string }; Body: UpdateSessionRequest }>('/api/sessions/:id', async (req) => {

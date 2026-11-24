@@ -42,6 +42,10 @@ export interface SessionSummary {
   /** Driver のプロセスが動いているか */
   live: boolean;
   archived: boolean;
+  /** 何も書き込まれていない（空の）セッションか。空のまま画面で閉じると Hub が消す */
+  empty: boolean;
+  /** このセッションを作った AI のセッション（AI が Hub の API で作ったときだけ）。Web はこれを見て自動で開く */
+  parentSessionId?: string;
   /** 一覧に出す直近の動き（例: 'Edit src/api.ts'） */
   activity?: string;
   lastError?: string;
@@ -137,7 +141,7 @@ export interface CreateProjectRequest {
 export interface CreateSessionRequest {
   /** 省略時はプロジェクトの AI。指定してプロジェクトの AI と違えば 400 */
   agent?: AgentKind;
-  /** 許可リストのフォルダのパス */
+  /** 許可リストのフォルダのパス（AI が作るときは省略でき、作成元のセッションと同じフォルダになる） */
   cwd: string;
   /** モデルとエフォート。省略はエージェントの既定（実行中も set_model で変えられる） */
   model?: string;

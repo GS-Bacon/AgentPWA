@@ -186,7 +186,7 @@ describe('SessionManager', () => {
 
   it('動いていないセッションへの許可操作はエラー', async () => {
     const first = setup();
-    const s = await first.manager.create({ agent: 'claude', cwd: config.folders[0].path, permissionMode: 'ask' });
+    const s = await first.manager.create({ agent: 'claude', cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
     await first.manager.stop(s.id);
     await expect(first.manager.action(s.id, { type: 'approve', requestId: 'x', decision: 'allow' })).rejects.toThrow('動いていません');
     first.store.close();
@@ -227,7 +227,7 @@ describe('モデルとエフォート', () => {
 
   it('止まっているセッションの設定は Hub が覚えて、次の起動で渡す', async () => {
     const { manager, store, driver } = setup();
-    const s = await manager.create({ cwd: config.folders[0].path, model: 'opus' });
+    const s = await manager.create({ cwd: config.folders[0].path, model: 'opus', prompt: 'hi' });
     await manager.stop(s.id);
     await manager.action(s.id, { type: 'set_model', model: 'sonnet', effort: 'low' });
     expect(manager.get(s.id)).toMatchObject({ model: 'sonnet', effort: 'low', live: false });
@@ -274,7 +274,7 @@ describe('権限モード', () => {
 
   it('止まっているセッションのモードは Hub が覚えて、次の起動で渡す', async () => {
     const { manager, store, driver } = setup();
-    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
     await manager.stop(s.id);
     await manager.action(s.id, { type: 'set_permission_mode', mode: 'auto_edit' });
     expect(manager.get(s.id).permissionMode).toBe('auto_edit');
@@ -316,7 +316,7 @@ describe('権限モード', () => {
 
   it('full_auto の許可が外れたプロジェクトのセッションは、再開時に「毎回確認」で起動する', async () => {
     const { manager, store, driver } = setup();
-    const s = await manager.create({ cwd: config.folders[2].path, permissionMode: 'full_auto' });
+    const s = await manager.create({ cwd: config.folders[2].path, permissionMode: 'full_auto', prompt: 'hi' });
     await manager.stop(s.id);
     config.folders[2] = { ...config.folders[2], allowFullAuto: false };
     await manager.action(s.id, { type: 'send', text: '再開' });
@@ -362,7 +362,7 @@ describe('アーカイブと削除', () => {
 
   it('止まっているセッションのアーカイブでは stop を呼ばない', async () => {
     const { manager, store, driver } = setup();
-    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
     await manager.stop(s.id);
     expect(driver.stops).toBe(1);
     await manager.update(s.id, { archived: true });
@@ -400,8 +400,8 @@ describe('アーカイブと削除', () => {
 
   it('削除したセッションは Hub を再起動しても戻らない', async () => {
     const first = setup();
-    const keep = await first.manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
-    const gone = await first.manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
+    const keep = await first.manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
+    const gone = await first.manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
     await first.manager.remove(gone.id);
     first.store.close();
     const second = setup(new TestDriver());
@@ -472,5 +472,79 @@ describe('フォルダの許可リスト', () => {
     expect(findAllowedFolder(c, path.resolve('/work/a'))?.name).toBe('a');
     expect(findAllowedFolder(c, path.resolve('/work/a/sub'))).toBeUndefined();
     expect(findAllowedFolder(c, path.resolve('/work/a/../b'))).toBeUndefined();
+  });
+});
+
+describe('空のセッション', () => {
+  it('最初の指示なしで作ったセッションは空。ユーザーが送信すると空でなくなる', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, permissionMode: 'ask' });
+    expect(s.empty).toBe(true);
+    driver.emit({ type: 'message', messageId: 'u1', role: 'user', text: 'CI を直して' });
+    expect(manager.get(s.id)).toMatchObject({ empty: false, title: 'CI を直して' });
+    expect(await manager.discardIfEmpty(s.id)).toBe(false);
+    expect(manager.get(s.id).id).toBe(s.id);
+    store.close();
+  });
+
+  it('空のセッションは discardIfEmpty・停止・アーカイブで消える', async () => {
+    const { manager, store } = setup();
+    const removed: string[] = [];
+    manager.on('removed', (id) => removed.push(id));
+    const a = await manager.create({ cwd: config.folders[0].path });
+    const b = await manager.create({ cwd: config.folders[0].path });
+    const c = await manager.create({ cwd: config.folders[0].path });
+    expect(await manager.discardIfEmpty(a.id)).toBe(true);
+    await manager.stop(b.id);
+    await manager.update(c.id, { archived: true });
+    expect(removed).toEqual([a.id, b.id, c.id]);
+    expect(manager.list()).toEqual([]);
+    expect(store.loadSessions()).toEqual([]);
+    store.close();
+  });
+
+  it('名前を付けたセッションは空とみなさない', async () => {
+    const { manager, store } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path });
+    await manager.update(s.id, { title: '調査用' });
+    expect(await manager.discardIfEmpty(s.id)).toBe(false);
+    store.close();
+  });
+
+  it('Hub の起動時に、前回の空のセッションを消す（started の無い古い記録は名前で判断する）', async () => {
+    const first = setup();
+    const empty = await first.manager.create({ cwd: config.folders[0].path });
+    const keep = await first.manager.create({ cwd: config.folders[0].path, prompt: 'hi' });
+    // 古い形の記録（started なし）
+    const old = { ...first.store.loadSessions().find((r) => r.id === keep.id)!, id: 'old-1', title: '別の名前' } as Record<string, unknown>;
+    delete old.started;
+    first.store.saveSession(old as never);
+    first.store.close();
+    const second = setup(new TestDriver());
+    const ids = second.manager.list().map((s) => s.id);
+    expect(ids).not.toContain(empty.id);
+    expect(ids).toEqual(expect.arrayContaining([keep.id, 'old-1']));
+    second.store.close();
+  });
+});
+
+describe('AI からのセッション作成', () => {
+  it('作成元を記録し、cwd を省くと作成元と同じフォルダで始める', async () => {
+    const { manager, store } = setup();
+    const parent = await manager.create({ cwd: config.folders[2].path, prompt: 'hi' });
+    const child = await manager.create({ cwd: '', prompt: '別の作業' }, parent.id);
+    expect(child).toMatchObject({ parentSessionId: parent.id, cwd: config.folders[2].path, empty: false });
+    await expect(manager.create({ cwd: '', prompt: 'x' }, 'no-such')).rejects.toThrow('作成元');
+    store.close();
+  });
+
+  it('作成元が「すべて自動」でなければ「すべて自動」のセッションは作れない', async () => {
+    const { manager, store } = setup();
+    const parent = await manager.create({ cwd: config.folders[2].path, permissionMode: 'ask', prompt: 'hi' });
+    await expect(manager.create({ cwd: '', permissionMode: 'full_auto', prompt: 'x' }, parent.id)).rejects.toThrow('すべて自動');
+    const auto = await manager.create({ cwd: config.folders[2].path, permissionMode: 'full_auto', prompt: 'hi' });
+    const child = await manager.create({ cwd: '', permissionMode: 'full_auto', prompt: 'x' }, auto.id);
+    expect(child.permissionMode).toBe('full_auto');
+    store.close();
   });
 });

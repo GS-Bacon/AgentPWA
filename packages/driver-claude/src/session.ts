@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import readline from 'node:readline';
 import { EFFORT_LEVELS, type Attachment, type DriverEvent, type DriverSession, type EffortLevel, type PermissionMode, type SessionStatus, type StartOptions, type UserAction } from '@agentpwa/shared';
 import { buildUserContent, type AttachmentStore } from './attachments.ts';
+import { hubGuide, withHubEnv } from './hub-guide.ts';
 import type { ProcessLauncher } from './launcher.ts';
 import { StreamMapper } from './mapper.ts';
 import { answerToUpdatedInput, buildPrompt, sessionAllowKey, toClaudePermissionMode } from './permissions.ts';
@@ -253,8 +254,11 @@ export class ClaudeSession implements DriverSession {
     if (this.resumeToken) args.push('--resume', this.resumeToken);
     // 添付ファイルの置き場所を、確認なしで読めるフォルダに加える
     if (this.deps.attachments) args.push('--add-dir', this.deps.attachments.dir(this.opts.sessionId));
+    // Hub の API で新しいセッションを作る方法を伝える（hub-guide.ts）
+    const guide = hubGuide(this.deps.env);
+    if (guide) args.push('--append-system-prompt', guide);
 
-    const env = childEnv(this.deps.env);
+    const env = withHubEnv(childEnv(this.deps.env), this.opts.sessionId);
 
     this.setStatus('starting');
     this.killedOnPurpose = false;

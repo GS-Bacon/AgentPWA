@@ -134,6 +134,26 @@ function notifyClosed(ids: string[]): void {
   for (const l of closeListeners) l(ids);
 }
 
+// ---- AI が作ったセッション ----
+// セッションの中の AI が Hub の API で新しいセッションを作ったら（parentSessionId 付きで届いたら）、画面で開く。
+
+const openListeners = new Set<(id: string) => void>();
+
+export function onSessionCreatedByAgent(cb: (id: string) => void): () => void {
+  openListeners.add(cb);
+  return () => openListeners.delete(cb);
+}
+
+/**
+ * 画面から外した（ペインを閉じた・別のセッションに切り替えた・詳細画面から戻った）セッションが空なら、Hub に消してもらう。
+ * 何も書き込まれていない「新しいセッション」を残さないため。
+ */
+export function discardIfEmpty(ids: Iterable<string>): void {
+  for (const id of ids) {
+    if (state.sessions[id]?.empty) api.discard(id).catch(() => {});
+  }
+}
+
 function onMessage(m: ServerMessage): void {
   switch (m.type) {
     case 'hello': {
@@ -157,6 +177,7 @@ function onMessage(m: ServerMessage): void {
       const prev = state.sessions[m.session.id];
       set((s) => ({ sessions: { ...s.sessions, [m.session.id]: m.session } }));
       if (prev && !prev.archived && m.session.archived) notifyClosed([m.session.id]);
+      if (!prev && m.session.parentSessionId && !m.session.archived) for (const l of openListeners) l(m.session.id);
       break;
     }
     case 'session_removed': {
