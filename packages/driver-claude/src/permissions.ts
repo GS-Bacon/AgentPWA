@@ -1,5 +1,5 @@
 // Claude のツール呼び出しを、プロトコルの表示用データ（要約・許可要求・質問）に変換する。
-import type { ApprovalDecision, DriverEvent, FileChange, PermissionMode } from '@agentpwa/shared';
+import type { ApprovalDecision, DriverEvent, FileChange, PermissionMode, QuestionItem, QuestionOption } from '@agentpwa/shared';
 
 type Input = Record<string, unknown>;
 
@@ -167,10 +167,10 @@ export type PermissionPrompt =
 /** --permission-prompt-tool に来た問い合わせを、approval_request か question に変換する。 */
 export function buildPrompt(requestId: string, name: string, input: Input, cwd: string): PermissionPrompt {
   if (name === 'AskUserQuestion' && Array.isArray(input.questions)) {
-    const qs = input.questions as { question?: string; options?: { label?: string }[] }[];
-    const prompt = qs.map((q) => str(q.question)).filter(Boolean).join('\n');
-    const options = qs.length === 1 ? (qs[0].options ?? []).map((o) => str(o.label)).filter(Boolean) : undefined;
-    return { kind: 'question', event: { type: 'question', requestId, prompt, options } };
+    const questions = toQuestionItems(input);
+    const prompt = questions.map((q) => q.question).join('\n');
+    const options = questions.length === 1 ? questions[0].options.map((o) => o.label) : undefined;
+    return { kind: 'question', event: { type: 'question', requestId, prompt, options, questions } };
   }
   const allChoices: ApprovalDecision[] = ['allow', 'allow_session', 'deny'];
   if (SHELL_TOOLS.has(name)) {
@@ -228,10 +228,38 @@ export function buildPrompt(requestId: string, name: string, input: Input, cwd: 
   };
 }
 
-/** AskUserQuestion への回答を、claude CLI が受け付ける updatedInput に変換する。 */
-export function answerToUpdatedInput(input: Input, text: string): Input {
-  const qs = Array.isArray(input.questions) ? (input.questions as { question?: string }[]) : [];
+/** AskUserQuestion の input.questions を、プロトコルの QuestionItem に直す（質問文の無いものは捨てる）。 */
+function toQuestionItems(input: Input): QuestionItem[] {
+  const qs = Array.isArray(input.questions) ? (input.questions as Input[]) : [];
+  const out: QuestionItem[] = [];
+  for (const q of qs) {
+    const question = str(q.question);
+    if (!question) continue;
+    const opts = Array.isArray(q.options) ? (q.options as Input[]) : [];
+    const options: QuestionOption[] = [];
+    for (const o of opts) {
+      const label = str(o.label);
+      if (!label) continue;
+      const description = str(o.description);
+      options.push(description ? { label, description } : { label });
+    }
+    const item: QuestionItem = { question, options };
+    if (str(q.header)) item.header = str(q.header);
+    if (q.multiSelect === true) item.multiSelect = true;
+    out.push(item);
+  }
+  return out;
+}
+
+/**
+ * AskUserQuestion への回答を、claude CLI が受け付ける updatedInput に変換する。
+ * perQuestion（問いごとの回答。順番は buildPrompt の questions と同じ）があればそれを使い、
+ * 無ければ（古い Web から）text をすべての問いの答えにする。
+ */
+export function answerToUpdatedInput(input: Input, text: string, perQuestion?: string[]): Input {
   const answers: Record<string, string> = {};
-  for (const q of qs) if (q.question) answers[q.question] = text;
+  toQuestionItems(input).forEach((q, i) => {
+    answers[q.question] = perQuestion ? (perQuestion[i] ?? '').trim() || '（回答なし）' : text;
+  });
   return { ...input, answers };
 }

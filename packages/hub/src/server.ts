@@ -75,6 +75,10 @@ function parseAction(body: unknown): UserAction {
       return { type: 'approve', requestId: b.requestId, decision: b.decision as 'allow' | 'allow_session' | 'deny', note: typeof b.note === 'string' ? b.note : undefined };
     case 'answer':
       if (typeof b.requestId !== 'string' || typeof b.text !== 'string') break;
+      if (b.answers !== undefined) {
+        if (!Array.isArray(b.answers) || !b.answers.every((a) => typeof a === 'string')) break;
+        return { type: 'answer', requestId: b.requestId, text: b.text, answers: b.answers as string[] };
+      }
       return { type: 'answer', requestId: b.requestId, text: b.text };
     case 'interrupt':
       return { type: 'interrupt' };

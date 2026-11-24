@@ -68,7 +68,13 @@ starting ──► running ──► idle ──(send)──► running
   - コマンドの実行そのものは `send` の本文（`/compact` など）で届く。どう扱うかは Driver に任せる。
 - Web が添付ボタンや補完を出すかは、`GET /api/info` の `agents.<AI>.attachments` / `commands`（Hub が Driver から求める）で決める。
 
-### 3.4 セッションのアーカイブと削除
+### 3.4 質問（v8）
+
+- 1回に複数の問いをまとめて聞くエージェントは、`question` の `questions`（問いごとの `question` / `header` / `options`（`label` / `description`）/ `multiSelect`）を入れる。`prompt` には問いの文を改行でつないで入れる（一覧の表示用）。問いが1つなら、古い Web のために `options` にもラベルを入れておく。
+- Web は `questions` があれば問いごとに選択肢と自由記述（その他）を出し、全問に答えてから `answer` を送る。`answer` の `answers[i]` が `questions[i]` への回答（複数選択は「, 」でつなぐ。自由記述は選択肢と同じ並びに足す）。`text` には全問をまとめた文を入れるので、`answers` を読まない Driver はそれを使えばよい。
+- `questions` の無い質問には、Web は `answers` を付けない（従来どおり `text` だけ）。
+
+### 3.5 セッションのアーカイブと削除
 
 - アーカイブと削除は Hub が扱う。Driver に `UserAction` は届かない。
 - Hub は、動いているセッション（`stopped` 以外）をアーカイブ・削除する前に `stop()` を呼ぶ。アーカイブを戻したセッションは `stopped` のままで、次に送信したときに `resumeToken` で再開する。
@@ -98,7 +104,7 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | スラッシュコマンド | 一覧は、CLI を短く起動して制御要求 `{"subtype":"initialize"}` を送り、応答の `commands`（`name` / `description` / `argumentHint`）を使う（API は呼ばない）。`__` で始まる内部用は除く。実行は本文をそのまま送る（`/context` などの出力は、モデル `<synthetic>` の assistant メッセージで届く）。ただし引数つきの `/model <名前>` と `/effort <段階>` は CLI に送らず、`set_model` と同じ処理にする（Hub と Web の表示をそろえるため。`default` / `auto` は既定に戻す） |
 | 許可要求 | `--permission-prompt-tool stdio` で、CLI から標準出力に `{"type":"control_request","request_id":…,"request":{"subtype":"can_use_tool","tool_name","input","tool_use_id",…}}` が届く。これを `approval_request`（`requestId` = tool_use_id）に変換する。決定は標準入力に `{"type":"control_response","response":{"subtype":"success","request_id":…,"response":{"behavior":"allow","updatedInput":…}}}`（拒否は `{"behavior":"deny","message":…}`）で返す。CLI が `control_cancel_request` で取り下げたら、`approval_resolved`（deny）にする。MCP ツールは使わない（SSH 先の CLI から届かないため。docs/architecture.md の 6.4） |
 | allow_session | CLI には渡さず Driver が覚える。シェル（Bash / PowerShell）はコマンドの先頭の語ごと、それ以外はツール名ごとに、以後の問い合わせを自動で許可する |
-| 質問 | `AskUserQuestion` の許可要求を `question` に変換する（選択肢は質問が1つのときだけ `options` に入れる）。回答は `updatedInput.answers = {質問文: 回答}` で返す |
+| 質問 | `AskUserQuestion` の許可要求を `question` に変換する。`input.questions` を問いごとに `questions` に入れる（`options` は問いが1つのときだけ）。回答は `updatedInput.answers = {質問文: 回答}` で、`answer.answers[i]` を i 番目の問いの答えにする（`answers` が無ければ `text` を全問の答えにする） |
 | プランの承認 | `ExitPlanMode` の許可要求を `approval_request`（`kind: 'other'`、`command` にプラン本文、choices は allow / deny）にする |
 | 再開 | `--resume <session_id>`（`resume_token` = system/init の session_id）。Hub 再起動後や CLI が落ちた後は、次の送信で起動し直す |
 | 中断 | 標準入力に `{"type":"control_request","request_id":"…","request":{"subtype":"interrupt"}}` を書く。5 秒以内に result が来なければプロセスを終了し、次の送信で `--resume` する。どちらも `status: idle`（reason: 中断しました）にする |
@@ -146,6 +152,10 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 - スラッシュコマンド: 使えるコマンドの一覧が app-server から取れるなら `listCommands(cwd)` を実装する
 - 権限モードの既定が `DEFAULT_PERMISSION_MODE`（`auto`）になりました。`auto` に当たる設定が無ければ、3章5のとおり `ask` に落としてください
 
+### Codex への依頼（質問の選択肢、v8）
+
+- Codex 側に、1回に複数の問いや選択肢つきの問いを出す仕組みがあれば、`question` の `questions` に入れ、`answer` の `answers`（問いごとの回答）で返してください（3.4 を参照）。無ければ対応は不要です（`prompt` / `options` と `text` は今までどおり使えます）。
+
 ### Codex への依頼（セッションの削除）
 
 - `deleteHistory` を実装するか決めて、対応表に書いてください。app-server にスレッドを消す（またはアーカイブする）メソッドがあれば使い、なければ実装しなくてよい（Hub の記録だけ消える）。
@@ -172,3 +182,4 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 | 2026-11-24 | 5 | `tool` イベントに `paths`（ツールの対象ファイルのパス。省略可）を追加（3章6。ファイルビュワー用） | Claude |
 | 2026-11-24 | 6 | `model` イベントに `resolvedModel` / `resolvedEffort`（既定やエイリアスを解決した実際の値。省略可）を追加（3.2）。Codex 側の対応は任意 | Claude |
 | 2026-11-24 | 7 | 添付ファイル（`send` の `attachments`、`message` の `attachments`、`AgentDriver.supportsAttachments`）と、スラッシュコマンドの一覧（`AgentDriver.listCommands`、`SlashCommand`）を追加（3.3。アーカイブと削除は 3.4 に移動）。プロジェクトに既定の権限モードが無いときのモードを `ask` から `auto` に変更（`DEFAULT_PERMISSION_MODE`） | Claude |
+| 2026-11-24 | 8 | `question` に `questions`（問いごとの見出し・選択肢と説明・複数選択。`QuestionItem` / `QuestionOption`）を、`answer` に `answers`（問いごとの回答）を追加（3.4。アーカイブと削除は 3.5 に移動）。どちらも省略可で、古い形（`prompt` / `options` / `text`）も使える。Codex 側の対応は任意 | Claude |

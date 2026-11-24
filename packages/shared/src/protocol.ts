@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -127,6 +127,23 @@ export interface FileChange {
   diff?: string;
 }
 
+/** 質問の選択肢（v8）。 */
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** 1つの問い（v8）。 */
+export interface QuestionItem {
+  question: string;
+  /** 短い見出し（例: 'Port'） */
+  header?: string;
+  /** 選択肢。空なら自由記述だけ。Web は選択肢に加えて、常に自由記述（その他）も受け付ける。 */
+  options: QuestionOption[];
+  /** 複数選べる */
+  multiSelect?: boolean;
+}
+
 /** Driver → Hub のイベント。Hub が sessionId / seq / at を付けて保存・配信する。 */
 export type DriverEvent =
   | { type: 'status'; status: SessionStatus; reason?: string }
@@ -168,7 +185,16 @@ export type DriverEvent =
       choices: ApprovalDecision[];
     }
   | { type: 'approval_resolved'; requestId: string; decision: ApprovalDecision }
-  | { type: 'question'; requestId: string; prompt: string; options?: string[] }
+  | {
+      type: 'question';
+      requestId: string;
+      /** 質問文（複数の問いは改行でつなぐ）。一覧の表示や、`questions` を読まない UI に使う。 */
+      prompt: string;
+      /** 選択肢（問いが1つのときの古い形）。`questions` があれば UI はそちらを使う。 */
+      options?: string[];
+      /** v8: 問いごとの見出し・選択肢・複数選択。1回に複数の問いをまとめて聞くエージェントは、これを入れる。 */
+      questions?: QuestionItem[];
+    }
   | { type: 'question_resolved'; requestId: string }
   /** 再開に必要なエージェント固有 ID（Claude の session_id、Codex の thread.id など）。分かった時点ですぐ送る。 */
   | { type: 'resume_token'; token: string }
@@ -210,7 +236,14 @@ export type UserAction =
   /** 添付ファイルがあれば text は空でもよい（添付は supportsAttachments の Driver だけ） */
   | { type: 'send'; text: string; attachments?: Attachment[] }
   | { type: 'approve'; requestId: string; decision: ApprovalDecision; note?: string }
-  | { type: 'answer'; requestId: string; text: string }
+  | {
+      type: 'answer';
+      requestId: string;
+      /** 回答の全文（`answers` を読まない Driver はこれを使う）。 */
+      text: string;
+      /** v8: `questions[i]` への回答を i 番目に入れる（複数選択は「, 」でつなぐ）。`questions` の無い質問では省く。 */
+      answers?: string[];
+    }
   | { type: 'interrupt' }
   /** 実行中に権限モードを変える。反映できたら Driver が permission_mode イベントを送る。 */
   | { type: 'set_permission_mode'; mode: PermissionMode }

@@ -1,6 +1,6 @@
 // 許可要求と質問のカード
 import { useEffect, useState } from 'react';
-import type { ApprovalDecision, FileChange } from '@agentpwa/shared';
+import type { ApprovalDecision, FileChange, QuestionItem } from '@agentpwa/shared';
 import type { ApprovalRequest, QuestionRequest, SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { run } from '../lib/store.ts';
@@ -176,47 +176,119 @@ export function ApprovalCard({ session, req, focused }: { session: SessionSummar
   );
 }
 
+/** 問いへの回答（選んだ選択肢と、自由記述）。 */
+type Draft = { picked: string[]; other: string };
+
+function draftAnswer(q: QuestionItem, d: Draft): string {
+  const other = d.other.trim();
+  if (q.multiSelect) return [...d.picked, ...(other ? [other] : [])].join(', ');
+  return other || d.picked[0] || '';
+}
+
 export function QuestionCard({ session, req }: { session: SessionSummary; req: QuestionRequest }) {
   const now = useNow();
-  const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const answer = async (t: string) => {
-    if (!t.trim()) return;
+  // v8 より前の Driver（questions なし）は、prompt と options の1問として扱い、answers は送らない
+  const structured = !!req.questions && req.questions.length > 0;
+  const questions: QuestionItem[] = structured
+    ? req.questions!
+    : [{ question: req.prompt, options: (req.options ?? []).map((label) => ({ label })) }];
+  const [drafts, setDrafts] = useState<Draft[]>(() => questions.map(() => ({ picked: [], other: '' })));
+  const setDraft = (i: number, d: Draft) => setDrafts((ds) => ds.map((x, j) => (j === i ? d : x)));
+
+  const submit = async (answers: string[]) => {
+    if (answers.some((a) => !a.trim())) return;
+    const text = questions.length === 1 ? answers[0] : questions.map((q, i) => `${q.question}\n→ ${answers[i]}`).join('\n');
     setBusy(true);
-    await run(() => api.action(session.id, { type: 'answer', requestId: req.requestId, text: t }));
+    await run(() => api.action(session.id, structured ? { type: 'answer', requestId: req.requestId, text, answers } : { type: 'answer', requestId: req.requestId, text }));
     setBusy(false);
   };
+
+  // 単一選択の1問だけなら、選択肢を押した時点で答える（従来どおり）
+  const quick = questions.length === 1 && !questions[0].multiSelect;
+  const answers = questions.map((q, i) => draftAnswer(q, drafts[i]));
+  const ready = answers.every((a) => a.trim());
+
   return (
     <section className="ask ask-q" aria-label="質問">
       <div className="ask-head">
-        <h3>質問</h3>
+        <h3>{questions.length > 1 ? `質問（${questions.length}件）` : '質問'}</h3>
         <span className="muted" style={{ fontSize: 12 }}>{elapsed(req.at, now)}</span>
       </div>
-      <div className="ask-body">
-        <p style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{req.prompt}</p>
-        {req.options && req.options.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {req.options.map((o) => (
-              <button key={o} className="btn btn-lg" style={{ justifyContent: 'flex-start' }} disabled={busy} onClick={() => answer(o)}>
-                {o}
-              </button>
-            ))}
-          </div>
-        )}
-        <form
-          className="composer-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void answer(text);
-          }}
-        >
-          <label className="sr-only" htmlFor={`ans-${req.requestId}`}>回答</label>
-          <input id={`ans-${req.requestId}`} className="input" style={{ flex: 1, height: 40 }} placeholder="自由に回答…" value={text} onChange={(e) => setText(e.target.value)} />
-          <button className="btn btn-primary" style={{ height: 40 }} disabled={busy || !text.trim()}>
+      <form
+        className="ask-body"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit(answers);
+        }}
+      >
+        {questions.map((q, i) => {
+          const d = drafts[i];
+          const toggle = (label: string) => {
+            if (quick) return void submit([label]);
+            if (q.multiSelect) setDraft(i, { ...d, picked: d.picked.includes(label) ? d.picked.filter((p) => p !== label) : [...d.picked, label] });
+            else setDraft(i, { picked: d.picked[0] === label ? [] : [label], other: '' });
+          };
+          const inputId = `ans-${req.requestId}-${i}`;
+          return (
+            <fieldset key={i} className="q-item">
+              <legend className="sr-only">{q.header || q.question}</legend>
+              {(q.header || q.multiSelect) && (
+                <div className="q-meta">
+                  {q.header && <span className="q-header">{q.header}</span>}
+                  {q.multiSelect && <span className="muted">複数選択できます</span>}
+                </div>
+              )}
+              <p style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{q.question}</p>
+              {q.options.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {q.options.map((o) => {
+                    const on = d.picked.includes(o.label);
+                    return (
+                      <button
+                        key={o.label}
+                        type="button"
+                        className="btn q-opt"
+                        aria-pressed={quick ? undefined : on}
+                        disabled={busy}
+                        onClick={() => toggle(o.label)}
+                      >
+                        <span className="q-opt-label">
+                          {!quick && <span className="q-mark" aria-hidden="true">{q.multiSelect ? (on ? '☑' : '☐') : on ? '●' : '○'}</span>}
+                          {o.label}
+                        </span>
+                        {o.description && <span className="q-opt-desc">{o.description}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <label className="sr-only" htmlFor={inputId}>
+                {q.options.length > 0 ? 'その他の回答' : '回答'}
+              </label>
+              <input
+                id={inputId}
+                className="input"
+                style={{ height: 40 }}
+                placeholder={q.options.length > 0 ? (q.multiSelect ? 'その他（自由記述・選択に追加）…' : 'その他（自由記述）…') : '自由に回答…'}
+                value={d.other}
+                disabled={busy}
+                onChange={(e) => setDraft(i, { picked: q.multiSelect || !e.target.value ? d.picked : [], other: e.target.value })}
+              />
+            </fieldset>
+          );
+        })}
+        <div className="ask-actions" style={{ justifyContent: 'flex-end' }}>
+          {!ready && questions.length > 1 && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              残り {answers.filter((a) => !a.trim()).length} 問
+            </span>
+          )}
+          <button className="btn btn-primary" style={{ height: 40 }} disabled={busy || !ready}>
             回答
           </button>
-        </form>
-      </div>
+        </div>
+      </form>
     </section>
   );
 }

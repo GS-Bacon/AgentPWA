@@ -166,7 +166,7 @@ export class ClaudeSession implements DriverSession {
         const p = this.pending.get(action.requestId);
         if (!p || p.kind !== 'question') throw new Error('この質問は解決済みです');
         this.pending.delete(action.requestId);
-        this.respond(p, { behavior: 'allow', updatedInput: answerToUpdatedInput(p.input, action.text) });
+        this.respond(p, { behavior: 'allow', updatedInput: answerToUpdatedInput(p.input, action.text, action.answers) });
         this.emit({ type: 'question_resolved', requestId: action.requestId });
         this.afterResolve();
         return;

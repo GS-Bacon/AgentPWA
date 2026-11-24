@@ -59,8 +59,40 @@ describe('permissions', () => {
   it('AskUserQuestion は question になり、回答は answers に入る', () => {
     const input = { questions: [{ question: 'ポートは？', header: 'Port', options: [{ label: '443' }, { label: '8443' }], multiSelect: false }] };
     const p = buildPrompt('r3', 'AskUserQuestion', input, '/w');
-    expect(p).toEqual({ kind: 'question', event: { type: 'question', requestId: 'r3', prompt: 'ポートは？', options: ['443', '8443'] } });
+    expect(p).toEqual({
+      kind: 'question',
+      event: {
+        type: 'question',
+        requestId: 'r3',
+        prompt: 'ポートは？',
+        options: ['443', '8443'],
+        questions: [{ question: 'ポートは？', header: 'Port', options: [{ label: '443' }, { label: '8443' }] }],
+      },
+    });
     expect(answerToUpdatedInput(input, '443')).toMatchObject({ answers: { 'ポートは？': '443' } });
+  });
+
+  it('AskUserQuestion の複数の問いは、問いごとに選択肢を渡し、回答も問いごとに返す', () => {
+    const input = {
+      questions: [
+        { question: '置き方は？', header: '置き方', options: [{ label: '手で置く', description: '人が置く' }, { label: 'ロボット' }], multiSelect: false },
+        { question: '消すものは？', header: '削除', options: [{ label: 'A' }, { label: 'B' }], multiSelect: true },
+      ],
+    };
+    const p = buildPrompt('r4', 'AskUserQuestion', input, '/w');
+    expect(p.event).toEqual({
+      type: 'question',
+      requestId: 'r4',
+      prompt: '置き方は？\n消すものは？',
+      options: undefined,
+      questions: [
+        { question: '置き方は？', header: '置き方', options: [{ label: '手で置く', description: '人が置く' }, { label: 'ロボット' }] },
+        { question: '消すものは？', header: '削除', options: [{ label: 'A' }, { label: 'B' }], multiSelect: true },
+      ],
+    });
+    expect(answerToUpdatedInput(input, '全文', ['ロボット', 'A, B'])).toMatchObject({ answers: { '置き方は？': 'ロボット', '消すものは？': 'A, B' } });
+    // 回答が足りない問いは空のままにしない
+    expect(answerToUpdatedInput(input, '全文', ['ロボット'])).toMatchObject({ answers: { '置き方は？': 'ロボット', '消すものは？': '（回答なし）' } });
   });
 
   it('セッション中の許可はシェルの先頭語ごとに覚える', () => {

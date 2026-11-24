@@ -398,3 +398,19 @@ a.btn { text-decoration: none; }
 }
 /* ドラッグ中は、ビュワーの iframe などがドラッグを横取りしないようにする */
 body.dragging iframe, body.dragging embed, body.dragging object { pointer-events: none; }
+
+/* 質問カードの問いと選択肢 */
+.q-item { border: none; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.q-item + .q-item { border-top: 1px solid var(--border); padding-top: 12px; }
+.q-meta { display: flex; gap: 8px; align-items: baseline; font-size: 12px; }
+.q-header { color: var(--question); font-weight: 600; }
+.q-opt {
+  height: auto; min-height: 44px; padding: 8px 12px; font-size: 14px;
+  flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px;
+  white-space: normal; text-align: left;
+}
+.q-opt[aria-pressed='true'] { border-color: var(--link); background: #388bfd1a; }
+.q-opt-label { display: flex; gap: 8px; align-items: baseline; }
+.q-mark { color: var(--fg-muted); font-size: 13px; }
+.q-opt[aria-pressed='true'] .q-mark { color: var(--link); }
+.q-opt-desc { color: var(--fg-muted); font-size: 12px; font-weight: 400; line-height: 1.5; }
