@@ -9,7 +9,7 @@ import { openSessionInNewPane, type LayoutState } from '../lib/layout.ts';
 import { archivedSessions, buildProjects, type Project } from '../lib/projects.ts';
 import { useNow } from '../components/Requests.tsx';
 import { AutoWarn, ConnState, ContextMenu, sessionMenuItems, StatusLabel, UsageBars, useLongPress } from '../components/common.tsx';
-import { AgentIcon, IconGear, IconPlus } from '../components/Icons.tsx';
+import { AgentIcon, IconGear, IconPlus, ProjectSwatch } from '../components/Icons.tsx';
 
 export const DRAG_TYPE = 'application/x-agentpwa-session';
 /** プロジェクトの並べ替え用（ペインへのドロップとは別の種類にする） */
@@ -169,6 +169,7 @@ function ProjectGroup({
           </span>
           <AgentIcon agent={p.agent} />
           <span className="ellipsis" style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</span>
+          <ProjectSwatch color={p.color} />
           {!p.registered && <span className="muted" style={{ fontSize: 11, flex: 'none' }}>登録外</span>}
           <span className="muted" style={{ fontSize: 11, flex: 'none' }}>{p.sessions.length}</span>
         </button>

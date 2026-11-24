@@ -62,6 +62,17 @@ export interface FolderEntry {
   allowFullAuto?: boolean;
   /** 新しいセッションの既定の権限モード。省略時は 'auto'（DEFAULT_PERMISSION_MODE。Hub が読み込み時に補う） */
   defaultPermissionMode?: PermissionMode;
+  /** プロジェクトの色（パレットの名前）。ペインの上部などを塗って見分けやすくする。省略時は色なし */
+  color?: ProjectColor;
+}
+
+/** プロジェクトに付けられる色（パレット）。実際の色は Web の PROJECT_COLOR_HEX で決める */
+export type ProjectColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink' | 'gray';
+
+/** PATCH /api/projects の本文。path のプロジェクトの設定を変える（いまは色だけ。null で色を外す） */
+export interface UpdateProjectRequest {
+  path: string;
+  color: ProjectColor | null;
 }
 
 export interface AgentInfo {

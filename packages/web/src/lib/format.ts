@@ -1,9 +1,36 @@
 // 表示用の小さな関数
 import { PERMISSION_MODES, type AgentKind, type PermissionMode } from '@agentpwa/shared';
-import type { SessionSummary } from '@agentpwa/hub/api';
+import type { ProjectColor, SessionSummary } from '@agentpwa/hub/api';
 
 export const AGENT_LABEL: Record<AgentKind, string> = { claude: 'Claude', codex: 'Codex' };
 export const AGENT_COLOR: Record<AgentKind, string> = { claude: 'var(--claude)', codex: 'var(--codex)' };
+
+/** プロジェクトの色のパレット（Primer dark の各色。並びは設定画面の並び） */
+export const PROJECT_COLOR_HEX: Record<ProjectColor, string> = {
+  red: '#f85149',
+  orange: '#db6d28',
+  yellow: '#d29922',
+  green: '#3fb950',
+  teal: '#39c5cf',
+  blue: '#4493f8',
+  purple: '#ab7df8',
+  pink: '#db61a2',
+  gray: '#9198a1',
+};
+export const PROJECT_COLOR_LABEL: Record<ProjectColor, string> = {
+  red: '赤', orange: 'オレンジ', yellow: '黄', green: '緑', teal: '青緑', blue: '青', purple: '紫', pink: 'ピンク', gray: 'グレー',
+};
+export const PROJECT_COLORS = Object.keys(PROJECT_COLOR_HEX) as ProjectColor[];
+
+/**
+ * プロジェクトの色で塗るヘッダーの style（左端の帯 + 背景をその色で薄く塗る）。色が無ければ空。
+ * 文字が読めるように、背景は --bg-muted に 22% だけ混ぜる。
+ */
+export function projectHeadStyle(color: ProjectColor | undefined): React.CSSProperties {
+  if (!color) return {};
+  const hex = PROJECT_COLOR_HEX[color];
+  return { background: `color-mix(in srgb, ${hex} 22%, var(--bg-muted))`, boxSizing: 'border-box', borderLeft: `4px solid ${hex}` };
+}
 
 export const MODE_LABEL: Record<PermissionMode, string> = {
   ask: '毎回確認',

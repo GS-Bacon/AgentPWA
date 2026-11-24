@@ -9,7 +9,7 @@ import type { CreateProjectRequest, ReorderProjectsRequest, CreateSessionRequest
 import { checkOrigin, checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
 import { fileHeaders, resolveProjectFile, toInfo } from './files.ts';
-import { createProject, listDirs, reorderProjects, type ProjectDeps } from './projects.ts';
+import { createProject, listDirs, reorderProjects, updateProject, type ProjectDeps } from './projects.ts';
 import { HttpError, type SessionManager } from './sessions.ts';
 
 declare module 'fastify' {
@@ -160,6 +160,8 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   app.post('/api/projects', async (req) => createProject(projectDeps, (req.body ?? {}) as Partial<CreateProjectRequest>));
   // プロジェクトの並び順（設定ファイルの folders の順）。登録済みのプロジェクトをすべて、新しい順で受け取る
   app.put('/api/projects/order', async (req) => reorderProjects(projectDeps, (req.body as Partial<ReorderProjectsRequest> | undefined)?.paths));
+  // プロジェクトの設定の変更（いまは色だけ。UpdateProjectRequest）
+  app.patch('/api/projects', async (req) => updateProject(projectDeps, req.body));
 
   app.post('/api/sessions', async (req) => {
     const b = (req.body ?? {}) as Partial<CreateSessionRequest>;

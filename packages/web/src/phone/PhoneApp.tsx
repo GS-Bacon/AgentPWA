@@ -5,8 +5,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { discardIfEmpty, onSessionCreatedByAgent, onSessionsClosed, sortedSessions, useStore, waitingCount } from '../lib/store.ts';
 import type { ArchiveSectionProps } from '../App.tsx';
-import { elapsed, shortPath, timeLabel } from '../lib/format.ts';
-import { archivedSessions, buildProjects, findProject, type Project } from '../lib/projects.ts';
+import { elapsed, projectHeadStyle, shortPath, timeLabel } from '../lib/format.ts';
+import { archivedSessions, buildProjects, findProject, useProjectColor, type Project } from '../lib/projects.ts';
 import { archiveSession, deleteSession, unarchiveSession } from '../lib/sessionActions.ts';
 import { ApprovalInline, useNow } from '../components/Requests.tsx';
 import { AutoWarn, ConnState, SessionMenu, StatusLabel } from '../components/common.tsx';
@@ -15,7 +15,7 @@ import { NewSessionForm } from '../components/NewSession.tsx';
 import { Settings } from '../components/Settings.tsx';
 import { FileViewer } from '../components/FileViewer.tsx';
 import { onOpenFile } from '../lib/viewer.ts';
-import { AgentIcon, IconBack, IconGear, IconPlus } from '../components/Icons.tsx';
+import { AgentIcon, IconBack, IconGear, IconPlus, ProjectSwatch } from '../components/Icons.tsx';
 
 type Route =
   | { name: 'list'; project: string | null }
@@ -233,6 +233,7 @@ function ProjectTabs({ projects, current, total, go }: { projects: Project[]; cu
           <>
             <AgentIcon agent={p.agent} />
             {p.name}
+            <ProjectSwatch color={p.color} />
           </>,
           p.waiting,
           p.path,
@@ -351,6 +352,7 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
 
 function DetailScreen({ id, back }: { id: string; back: () => void }) {
   const s = useStore((st) => st.sessions[id]);
+  const color = useProjectColor(s?.cwd);
   const now = useNow();
   if (!s) {
     return (
@@ -362,7 +364,7 @@ function DetailScreen({ id, back }: { id: string; back: () => void }) {
   }
   return (
     <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)', paddingBottom: 'var(--safe-bottom)' }}>
-      <header style={{ flex: 'none', padding: 'calc(8px + var(--safe-top)) 4px 8px 0', background: 'var(--bg-muted)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 2 }}>
+      <header style={{ flex: 'none', padding: 'calc(8px + var(--safe-top)) 4px 8px 0', background: 'var(--bg-muted)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 2, ...projectHeadStyle(color) }}>
         <button className="btn btn-ghost" aria-label="戻る" onClick={back} style={{ width: 44, height: 44, padding: 0, color: 'var(--fg)' }}>
           <IconBack size={20} />
         </button>

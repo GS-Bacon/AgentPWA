@@ -7,7 +7,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type AgentKind } from '@agentpwa/shared';
 import type { CreateProjectRequest, DirListing, FolderEntry } from './api.ts';
-import { findAllowedFolder, type HubConfig } from './config.ts';
+import { findAllowedFolder, PROJECT_COLORS, type HubConfig } from './config.ts';
 import { HttpError } from './sessions.ts';
 
 const execFileAsync = promisify(execFile);
@@ -217,6 +217,46 @@ async function doReorder(deps: ProjectDeps, paths: unknown): Promise<FolderEntry
   config.folders = keys.map((k) => current.get(k)!);
   deps.onChanged();
   return config.folders;
+}
+
+/**
+ * プロジェクトの設定を変える（いまは色だけ）。設定ファイルの folders の該当項目に color を書く（null なら消す）。
+ * ほかの項目は書かれたまま残す。
+ */
+export function updateProject(deps: ProjectDeps, body: unknown): Promise<FolderEntry> {
+  const run = queue.then(() => doUpdate(deps, body));
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function doUpdate(deps: ProjectDeps, body: unknown): Promise<FolderEntry> {
+  const { config } = deps;
+  const b = (body ?? {}) as { path?: unknown; color?: unknown };
+  if (typeof b.path !== 'string' || !path.isAbsolute(b.path)) throw new HttpError(400, 'プロジェクトのフォルダを絶対パスで指定してください');
+  if (b.color !== null && !PROJECT_COLORS.includes(b.color as never)) {
+    throw new HttpError(400, `色は ${PROJECT_COLORS.join(' / ')} のどれか（外すときは null）にしてください`);
+  }
+  const color = b.color as FolderEntry['color'] | null;
+  const key = pathKey(b.path);
+  const index = config.folders.findIndex((f) => pathKey(f.path) === key);
+  if (index < 0) throw new HttpError(404, `登録されていないプロジェクトです: ${b.path}`);
+
+  const raw = JSON.parse(await fs.promises.readFile(deps.configPath, 'utf8')) as Record<string, unknown>;
+  const items: unknown[] = Array.isArray(raw.folders) ? raw.folders : [];
+  const item = items.find((it) => {
+    const p = (it as { path?: unknown } | null)?.path;
+    return typeof p === 'string' && path.isAbsolute(p) && pathKey(p) === key;
+  }) as Record<string, unknown> | undefined;
+  if (!item) throw new HttpError(409, 'プロジェクトの一覧が変わっています。画面を読み直してから、もう一度変えてください');
+  if (color) item.color = color;
+  else delete item.color;
+  await writeConfig(deps.configPath, raw);
+  // 監視による読み直しを待たずに反映する
+  const { color: _old, ...rest } = config.folders[index];
+  const entry: FolderEntry = color ? { ...rest, color } : rest;
+  config.folders = config.folders.map((f, i) => (i === index ? entry : f));
+  deps.onChanged();
+  return entry;
 }
 
 /** 設定ファイルを書き換える。一時ファイルに書いてから置き換える */

@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type PermissionMode } from '@agentpwa/shared';
-import type { FolderEntry } from './api.ts';
+import type { FolderEntry, ProjectColor } from './api.ts';
+
+/** プロジェクトに付けられる色（api.ts の ProjectColor と同じ並び） */
+export const PROJECT_COLORS: readonly ProjectColor[] = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'gray'];
 
 export interface HubConfig {
   /** 待ち受けポート（127.0.0.1 固定） */
@@ -71,6 +74,9 @@ function validate(c: HubConfig, file: string): HubConfig {
     if (f.defaultPermissionMode !== undefined && !PERMISSION_MODES.includes(f.defaultPermissionMode)) {
       errors.push(`folders の defaultPermissionMode は ${PERMISSION_MODES.map((m) => `'${m}'`).join(' / ')} のどれかにしてください: ${label}`);
     }
+    if (f.color !== undefined && !PROJECT_COLORS.includes(f.color)) {
+      errors.push(`folders の color は ${PROJECT_COLORS.map((c) => `'${c}'`).join(' / ')} のどれかにしてください: ${label}`);
+    }
     if (f.defaultPermissionMode === 'full_auto' && f.allowFullAuto !== true) {
       errors.push(`defaultPermissionMode を 'full_auto' にするには allowFullAuto: true が必要です: ${label}`);
     }
@@ -83,6 +89,7 @@ function validate(c: HubConfig, file: string): HubConfig {
     agent: f.agent ?? 'claude',
     allowFullAuto: f.allowFullAuto === true,
     defaultPermissionMode: f.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE,
+    ...(f.color ? { color: f.color } : {}),
   }));
   c.projectRoots = c.projectRoots.map((r) => path.resolve(r));
   return c;

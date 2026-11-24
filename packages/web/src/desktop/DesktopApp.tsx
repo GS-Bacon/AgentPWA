@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.ts';
 import { discardIfEmpty, getState, onSessionCreatedByAgent, onSessionsClosed, run, sortedSessions, useStore } from '../lib/store.ts';
-import { isRunning } from '../lib/format.ts';
+import { isRunning, projectHeadStyle } from '../lib/format.ts';
+import { useProjectColor } from '../lib/projects.ts';
 import type { ArchiveSectionProps } from '../App.tsx';
 import { DRAG_TYPE, isWaiting, Rail, Sidebar } from './Sidebar.tsx';
 import {
@@ -91,6 +92,7 @@ function PaneView({
 }) {
   const s = useStore((st) => (pane.sessionId ? st.sessions[pane.sessionId] : undefined));
   const sessions = useStore((st) => st.sessions);
+  const color = useProjectColor(s?.cwd);
   const now = useNow();
   const [zone, setZone] = useState<DropZone | null>(null);
   const [dragKind, setDragKind] = useState<'pane' | 'session'>('pane');
@@ -233,6 +235,8 @@ function PaneView({
           cursor: 'grab',
           flex: 'none', padding: '5px 4px 5px 8px', background: 'var(--bg-muted)', borderTop: `2px solid ${waiting ? 'var(--attention)' : 'transparent'}`,
           borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, minHeight: 44,
+          // プロジェクトの色（設定画面で選ぶ）で左端の帯と背景を塗り、どのプロジェクトのペインかを見分けやすくする
+          ...projectHeadStyle(color),
         }}
       >
         <span className="pane-tag" style={focused ? { borderColor: 'var(--link)', color: 'var(--fg)' } : undefined}>{index + 1}</span>

@@ -3,8 +3,8 @@
 // 設定から外れたフォルダのセッションは、最後に「登録外」としてまとめる。
 // アーカイブしたセッションはプロジェクトに入れず、一覧の末尾の「アーカイブ済み」にまとめる（archivedSessions）。
 import type { AgentKind } from '@agentpwa/shared';
-import type { FolderEntry, HubInfo, SessionSummary } from '@agentpwa/hub/api';
-import { sortedSessions } from './store.ts';
+import type { FolderEntry, HubInfo, ProjectColor, SessionSummary } from '@agentpwa/hub/api';
+import { sortedSessions, useStore } from './store.ts';
 
 export interface Project {
   /** パスを小文字にしたもの（URL やペインの記憶に使う） */
@@ -13,6 +13,8 @@ export interface Project {
   path: string;
   /** このプロジェクトで使う AI */
   agent: AgentKind;
+  /** プロジェクトの色（設定ファイルの folders の color） */
+  color?: ProjectColor;
   /** 設定ファイルの folders に入っているか（入っていなければ新しいセッションは始められない） */
   registered: boolean;
   /** 優先順位で並べ替え済み */
@@ -31,7 +33,7 @@ export function buildProjects(info: HubInfo | null, sessions: Record<string, Ses
   const map = new Map<string, Project>();
   for (const f of info?.folders ?? []) {
     const key = projectKey(f.path);
-    map.set(key, { key, name: f.name, path: f.path, agent: f.agent, registered: true, sessions: [], waiting: 0 });
+    map.set(key, { key, name: f.name, path: f.path, agent: f.agent, color: f.color, registered: true, sessions: [], waiting: 0 });
   }
   const extra: Project[] = [];
   for (const s of sortedSessions(sessions)) {
@@ -62,6 +64,11 @@ export function archivedSessions(sessions: Record<string, SessionSummary>, key?:
 export function folderOf(info: HubInfo | null, cwd: string): FolderEntry | undefined {
   const key = projectKey(cwd);
   return info?.folders.find((f) => projectKey(f.path) === key);
+}
+
+/** フォルダ（cwd）のプロジェクトの色。色が無いか、登録外なら undefined */
+export function useProjectColor(cwd: string | undefined): ProjectColor | undefined {
+  return useStore((s) => (cwd ? folderOf(s.info, cwd)?.color : undefined));
 }
 
 /** このフォルダで「すべて自動」を選べるか（最終的な判定は Hub がする） */

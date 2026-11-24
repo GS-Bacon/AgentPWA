@@ -1,5 +1,7 @@
 // 線のアイコン（装飾なので aria-hidden）
 import type { ReactNode } from 'react';
+import type { ProjectColor } from '@agentpwa/hub/api';
+import { PROJECT_COLOR_HEX } from '../lib/format.ts';
 
 function Svg({ size = 16, children, fill = false, sw = 2 }: { size?: number; children: ReactNode; fill?: boolean; sw?: number }) {
   return (
@@ -65,4 +67,10 @@ export function AgentIcon({ agent, size = 14 }: { agent: 'claude' | 'codex'; siz
       {agent === 'claude' ? <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /> : <path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16" />}
     </svg>
   );
+}
+
+/** プロジェクトの色の見本（一覧のプロジェクト名の横）。色が無ければ何も出さない */
+export function ProjectSwatch({ color, size = 10 }: { color?: ProjectColor; size?: number }) {
+  if (!color) return null;
+  return <span aria-hidden="true" style={{ width: size, height: size, flex: 'none', display: 'inline-block', background: PROJECT_COLOR_HEX[color] }} />;
 }

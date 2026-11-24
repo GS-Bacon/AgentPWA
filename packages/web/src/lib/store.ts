@@ -2,7 +2,7 @@
 // useSyncExternalStore で購読する小さなストア。
 import { useSyncExternalStore } from 'react';
 import type { AgentKind, SessionEvent } from '@agentpwa/shared';
-import type { HubInfo, ServerMessage, SessionSummary, UsageInfo } from '@agentpwa/hub/api';
+import type { HubInfo, ProjectColor, ServerMessage, SessionSummary, UsageInfo } from '@agentpwa/hub/api';
 import { api } from './api.ts';
 
 export interface State {
@@ -308,6 +308,24 @@ export async function moveProject(path: string, to: number): Promise<void> {
     await api.reorderProjects({ paths: folders.map((f) => f.path) });
   } catch (e) {
     // その間に Hub から新しい info が届いていれば、そちらを残す
+    if (state.info?.folders === folders) set({ info: { ...state.info, folders: info.folders } });
+    showToast((e as Error).message);
+  }
+}
+
+/** プロジェクト（path）の色を変える（null で外す）。全端末で共有する。画面にはすぐ反映し、Hub が断ったら元に戻す */
+export async function setProjectColor(path: string, color: ProjectColor | null): Promise<void> {
+  const info = state.info;
+  if (!info) return;
+  const folders = info.folders.map((f) => {
+    if (f.path !== path) return f;
+    const { color: _old, ...rest } = f;
+    return color ? { ...rest, color } : rest;
+  });
+  set({ info: { ...info, folders } });
+  try {
+    await api.updateProject({ path, color });
+  } catch (e) {
     if (state.info?.folders === folders) set({ info: { ...state.info, folders: info.folders } });
     showToast((e as Error).message);
   }

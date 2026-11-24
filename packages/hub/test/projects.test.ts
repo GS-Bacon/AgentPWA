@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig, type HubConfig } from '../src/config.ts';
-import { createProject, isInside, listDirs, reorderProjects, validFolderName, type ProjectDeps } from '../src/projects.ts';
+import { createProject, isInside, listDirs, reorderProjects, updateProject, validFolderName, type ProjectDeps } from '../src/projects.ts';
 
 let dir: string;
 let root: string;
@@ -155,6 +155,37 @@ describe('プロジェクトの並べ替え', () => {
     await expect(reorderProjects(deps(), 'x')).rejects.toThrow('paths');
     await expect(reorderProjects(deps(), [1, 2])).rejects.toThrow('paths');
     expect(config.folders.map((f) => f.path)).toEqual([a, p1]);
+  });
+});
+
+describe('プロジェクトの色', () => {
+  it('設定ファイルに color を書き、null で消す。ほかの項目はそのまま', async () => {
+    const a = path.join(root, 'alpha');
+    const e = await updateProject(deps(), { path: a + path.sep, color: 'teal' });
+    expect(e.color).toBe('teal');
+    expect(config.folders[0].color).toBe('teal');
+    expect(changed).toBe(1);
+    let raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(raw.folders).toEqual([{ path: a, color: 'teal' }]);
+    expect(loadConfig(configPath).config.folders[0].color).toBe('teal');
+
+    await updateProject(deps(), { path: a, color: null });
+    expect(config.folders[0].color).toBeUndefined();
+    raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(raw.folders).toEqual([{ path: a }]);
+  });
+
+  it('知らない色や未登録のプロジェクトは断る', async () => {
+    const a = path.join(root, 'alpha');
+    await expect(updateProject(deps(), { path: a, color: '#ff0000' })).rejects.toThrow('色は');
+    await expect(updateProject(deps(), { path: a })).rejects.toThrow('色は');
+    await expect(updateProject(deps(), { path: path.join(root, 'beta'), color: 'red' })).rejects.toThrow('登録されていない');
+    await expect(updateProject(deps(), { path: 'rel', color: 'red' })).rejects.toThrow('絶対パス');
+  });
+
+  it('設定ファイルの color が不正なら読み込みで断る', () => {
+    fs.writeFileSync(configPath, JSON.stringify({ folders: [{ path: path.join(root, 'alpha'), color: 'navy' }] }));
+    expect(() => loadConfig(configPath)).toThrow('color');
   });
 });
 
