@@ -41,3 +41,26 @@ export function checkRequest(headers: Headers, s: AuthSettings): AuthResult {
   }
   return { ok: false, status: 401, reason: 'Tailscale のユーザーを確認できません（tailscale serve 経由で開いてください）' };
 }
+
+/**
+ * 書き込み系の API（/api/ の GET・HEAD 以外）と WebSocket（/ws）は、PWA 自身のオリジンからだけ受け付ける。
+ * Tailscale のヘッダーは端末ごとに付くので、ファイルビュワーで開いた HTML（サンドボックスで Origin は null）や
+ * 別のサイトのページから Hub を操作されないよう、Origin を Host と比べる。
+ * Origin の無いリクエスト（curl などブラウザ以外）は通す。ブラウザは POST などと WebSocket には必ず Origin を付ける。
+ */
+export function checkOrigin(method: string, url: string, headers: Headers): { ok: true } | { ok: false; reason: string } {
+  const isWs = url === '/ws' || url.startsWith('/ws?') || url.startsWith('/ws/');
+  const isWrite = url.startsWith('/api/') && method !== 'GET' && method !== 'HEAD';
+  if (!isWs && !isWrite) return { ok: true };
+  const origin = header(headers, 'origin');
+  if (origin === undefined) return { ok: true };
+  const deny = { ok: false as const, reason: `このページからは操作できません（Origin: ${origin}）` };
+  let host: string;
+  try {
+    host = new URL(origin).host.toLowerCase();
+  } catch {
+    return deny; // 'null'（サンドボックスの iframe など）もここで拒否する
+  }
+  // tailscale serve と開発時の Vite の中継は Host をそのまま渡すので、ページのオリジンと Host は一致する
+  return host === (header(headers, 'host') ?? '').toLowerCase() ? { ok: true } : deny;
+}

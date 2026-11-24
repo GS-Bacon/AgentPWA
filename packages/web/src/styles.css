@@ -299,3 +299,30 @@ kbd {
 .conn { font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
 .conn-off { color: var(--danger); }
 section[data-pane]:focus { outline: none; }
+
+/* ---- ファイルビュワー（docs/architecture.md の 5.1） ---- */
+.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+a.btn { text-decoration: none; }
+.viewer-head {
+  flex: none; min-height: 44px; padding: 5px 4px 5px 8px; background: var(--bg-muted); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 6px;
+}
+.viewer-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--bg); position: relative; }
+.viewer-body:fullscreen { background: var(--bg); }
+.viewer-immersive { position: fixed; inset: 0; z-index: 100; padding: var(--safe-top) 0 var(--safe-bottom); }
+.viewer-exit { position: absolute; top: calc(8px + var(--safe-top)); right: 8px; z-index: 1; background: var(--bg-muted); }
+.viewer-frame { flex: 1 1 auto; width: 100%; min-height: 0; border: none; background: #ffffff; }
+.viewer-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
+.viewer-center { display: flex; align-items: center; justify-content: center; padding: 12px; background: var(--bg-inset); }
+.viewer-toolbar { position: sticky; top: 0; display: flex; justify-content: flex-end; padding: 6px 8px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.viewer-code { margin: 0; padding: 8px 0; font: 12px/1.55 var(--mono); white-space: pre; background: var(--bg-inset); min-height: 100%; }
+.viewer-line { display: block; padding-right: 12px; }
+.viewer-ln { display: inline-block; width: 4.5em; padding-right: 12px; text-align: right; color: var(--fg-faint); user-select: none; }
+.viewer-md { padding: 12px 16px; }
+.viewer-dot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--link); }
+/* 会話の中のファイルのパス（タップでビュワーを開く） */
+.path-link { all: unset; cursor: pointer; color: var(--link); }
+.path-link:hover { text-decoration: underline; }
+.path-link:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+.msg-assistant code .path-link { color: var(--link); }
+.tool-line .path-link { color: var(--link); display: block; min-width: 0; }

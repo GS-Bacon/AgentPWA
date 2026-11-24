@@ -1,7 +1,5 @@
 // セッションの中身（会話・許可要求・入力欄）。iPhone の詳細画面と、iPad / Web のペインで共通に使う。
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { loadEvents, run, useStore } from '../lib/store.ts';
@@ -12,26 +10,27 @@ import { ApprovalCard, QuestionCard } from './Requests.tsx';
 import { IconSend, IconStop } from './Icons.tsx';
 import { PermissionButton, usePermissionSwitch } from './PermissionMode.tsx';
 import { ModelButton } from './ModelSettings.tsx';
+import { openFile } from '../lib/viewer.ts';
+import { PathMarkdown } from './PathMarkdown.tsx';
 
-const Markdown = memo(function Markdown({ text }: { text: string }) {
-  return (
-    <div className="msg-assistant">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-    </div>
-  );
-});
-
-function ToolLine({ t, cwd }: { t: ToolItem; cwd: string }) {
+function ToolLine({ t, cwd, sessionId }: { t: ToolItem; cwd: string; sessionId: string }) {
   const [open, setOpen] = useState(false);
   const mark = t.state === 'done' ? <span className="ok">✓</span> : t.state === 'failed' ? <span className="ng">✗</span> : <span className="run">…</span>;
+  const file = t.paths?.[0];
   return (
     <>
       <div className="tool-line">
         <button onClick={() => t.output && setOpen(!open)} aria-expanded={t.output ? open : undefined} title={t.output ? '出力を表示' : undefined}>
           {mark}
           <span style={{ color: 'var(--fg)' }}>{t.name}</span>
-          <span className="ellipsis">{relPath(t.summary, cwd)}</span>
+          {!file && <span className="ellipsis">{relPath(t.summary, cwd)}</span>}
         </button>
+        {/* 対象ファイルのあるツールは、要約のパスをタップするとビュワーで開く */}
+        {file && (
+          <button className="path-link ellipsis" title="ビュワーで開く" onClick={() => openFile(sessionId, file)}>
+            {relPath(t.summary, cwd)}
+          </button>
+        )}
       </div>
       {open && t.output && <div className="codebox tool-out">{t.output}</div>}
     </>
@@ -43,12 +42,12 @@ function ItemView({ item, session, focused }: { item: Item; session: SessionSumm
     case 'user':
       return <div className="msg-user">{item.text}</div>;
     case 'assistant':
-      return <Markdown text={item.text} />;
+      return <PathMarkdown text={item.text} sessionId={session.id} />;
     case 'tools':
       return (
         <div className="tools">
           {item.tools.map((t) => (
-            <ToolLine key={t.toolId} t={t} cwd={session.cwd} />
+            <ToolLine key={t.toolId} t={t} cwd={session.cwd} sessionId={session.id} />
           ))}
         </div>
       );

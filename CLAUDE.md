@@ -12,7 +12,7 @@
 - `packages/driver-codex/**`、`packages/web/src/agents/codex/**`、`AGENTS.md`
 - Codex 側に必要な変更は、依頼として PR の説明か Issue に書く。
 
-`packages/shared/**` は共同管理です。変更は `protocol/*` ブランチで共有型だけを変える PR にし、docs/protocol.md の変更履歴に追記します。
+`packages/shared/**` は共同管理です。変更は直接入れてよいですが、そのたびに docs/protocol.md の変更履歴に追記し、Codex 側の対応が要るものは docs/protocol.md の「Codex への依頼」に書きます。
 
 ## 前提（変えないこと）
 
@@ -26,5 +26,5 @@
 
 - 文書とコメントは日本語で書く。
 - Node.js（現行 LTS）+ TypeScript、ESM。パッケージ管理は npm workspaces。
-- コミットとプッシュはユーザーに頼まれたときだけ行う。ブランチ名は `claude/*`。
+- コミットとプッシュはユーザーに頼まれたときだけ行う。ブランチ名の決まりはない。
 - API キー、トークン、`.env` はコミットしない。

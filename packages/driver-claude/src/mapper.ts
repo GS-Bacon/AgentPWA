@@ -1,7 +1,7 @@
 // claude CLI の stream-json 出力（1行1件）を DriverEvent に変換する。
 // 状態（status）の管理は session.ts が行い、ここでは出力の正規化だけをする。
 import type { DriverEvent, PermissionMode } from '@agentpwa/shared';
-import { fromClaudePermissionMode, summarizeTool } from './permissions.ts';
+import { fromClaudePermissionMode, summarizeTool, toolPaths } from './permissions.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
@@ -51,7 +51,7 @@ export class StreamMapper {
   /** 完成版の assistant メッセージを待っている text block の messageId（API メッセージ ID ごとに FIFO） */
   private pendingText = new Map<string, string[]>();
   private textCounter = 0;
-  private tools = new Map<string, { name: string; summary: string }>();
+  private tools = new Map<string, { name: string; summary: string; paths?: string[] }>();
 
   map(msg: Json): MapResult {
     switch (msg?.type) {
@@ -129,9 +129,10 @@ export class StreamMapper {
       } else if (block?.type === 'tool_use') {
         const name = String(block.name ?? 'tool');
         const summary = summarizeTool(name, block.input ?? {});
+        const paths = toolPaths(name, block.input ?? {});
         const toolId = String(block.id);
-        this.tools.set(toolId, { name, summary });
-        events.push({ type: 'tool', toolId, name, summary, state: 'running' });
+        this.tools.set(toolId, { name, summary, paths });
+        events.push({ type: 'tool', toolId, name, summary, ...(paths ? { paths } : {}), state: 'running' });
       }
     }
     return { events, activity: true };
@@ -151,6 +152,7 @@ export class StreamMapper {
         toolId,
         name: t.name,
         summary: t.summary,
+        ...(t.paths ? { paths: t.paths } : {}),
         state: block.is_error ? 'failed' : 'done',
         output: truncate(toolResultText(block.content)),
       });

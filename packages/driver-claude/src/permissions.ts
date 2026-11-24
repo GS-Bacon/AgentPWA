@@ -89,6 +89,22 @@ export function summarizeTool(name: string, input: Input): string {
   }
 }
 
+/** ファイルを対象にするツールの、対象ファイルのパス（ファイルビュワー用）。無ければ undefined。 */
+export function toolPaths(name: string, input: Input): string[] | undefined {
+  switch (name) {
+    case 'Read':
+    case 'Write':
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit': {
+      const p = str(input.file_path || input.notebook_path);
+      return p ? [p] : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
 function simpleDiff(path: string, oldText: string, newText: string): string {
   const out = [`--- a/${path}`, `+++ b/${path}`];
   if (oldText) for (const l of oldText.split('\n')) out.push(`-${l}`);

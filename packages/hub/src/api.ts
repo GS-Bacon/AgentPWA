@@ -76,6 +76,19 @@ export interface HubInfo {
   projectRoots: string[];
 }
 
+/** ファイルビュワーでの表示のしかた（docs/architecture.md の 5.1） */
+export type FileKind = 'html' | 'image' | 'pdf' | 'media' | 'markdown' | 'text' | 'binary';
+
+/** GET /api/sessions/:id/file-info?path= の応答。中身は GET /files/<セッションID>/<path> で取る */
+export interface FileInfo {
+  /** プロジェクトのフォルダからの相対パス（区切りは /） */
+  path: string;
+  size: number;
+  mtime: string;
+  kind: FileKind;
+  mime: string;
+}
+
 /** GET /api/fs/dirs?path= の応答。path を省くとルートフォルダの一覧を返す */
 export interface DirListing {
   /** 見ているフォルダ（ルートの一覧のときは undefined） */

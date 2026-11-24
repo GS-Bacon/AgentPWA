@@ -27,7 +27,8 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/ws/],
+        // /files/ はファイルビュワーの iframe が開く。index.html を返さないようにする
+        navigateFallbackDenylist: [/^\/api\//, /^\/ws/, /^\/files\//],
       },
     }),
   ],
@@ -38,6 +39,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: hub },
       '/ws': { target: hub, ws: true },
+      '/files': { target: hub },
     },
   },
   preview: { host: '127.0.0.1' },

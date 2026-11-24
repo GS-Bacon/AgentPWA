@@ -5,9 +5,10 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { EFFORT_LEVELS, PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type EffortLevel, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
-import type { CreateProjectRequest, CreateSessionRequest, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
-import { checkRequest } from './auth.ts';
+import type { CreateProjectRequest, CreateSessionRequest, FileInfo, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
+import { checkOrigin, checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
+import { fileHeaders, resolveProjectFile, toInfo } from './files.ts';
 import { createProject, listDirs, type ProjectDeps } from './projects.ts';
 import { HttpError, type SessionManager } from './sessions.ts';
 
@@ -81,7 +82,17 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       return reply;
     }
     req.tailscaleUser = r.user;
+    // 書き込み系の API と WebSocket は、PWA 自身のページからだけ受け付ける
+    // （ファイルビュワーで開いた HTML の中のスクリプトなどから操作されないため。docs/architecture.md の 7）
+    const o = checkOrigin(req.method, req.url, req.headers);
+    if (!o.ok) {
+      reply.code(403).type('text/plain; charset=utf-8').send(o.reason);
+      return reply;
+    }
   });
+
+  // 本文のある API は JSON だけを受け付ける（text/plain の本文は、別のオリジンのフォームなどから送れてしまうため）
+  app.removeContentTypeParser('text/plain');
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof HttpError) {
@@ -169,6 +180,36 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     return { ok: true };
   });
 
+  // ファイルビュワー（docs/architecture.md の 5.1、6.7）。プロジェクトのフォルダの下のファイルだけ
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>('/api/sessions/:id/file-info', async (req): Promise<FileInfo> => {
+    const s = manager.get(req.params.id);
+    return toInfo(await resolveProjectFile(s.cwd, req.query.path ?? ''));
+  });
+
+  // HTML の中の相対パス（img/a.png など）がそのまま解決できるように、クエリではなくパスで指定する
+  app.get<{ Params: { id: string; '*': string } }>('/files/:id/*', async (req, reply) => {
+    const s = manager.get(req.params.id);
+    const f = await resolveProjectFile(s.cwd, req.params['*'] ?? '');
+    reply.headers(fileHeaders(f));
+    reply.header('accept-ranges', 'bytes');
+    // iPhone / iPad の Safari は、動画を Range で読めないと再生しない
+    const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+    if (range && f.size > 0 && (range[1] || range[2])) {
+      let start = range[1] ? Number(range[1]) : f.size - Number(range[2]);
+      let end = range[1] && range[2] ? Number(range[2]) : f.size - 1;
+      start = Math.max(0, start);
+      end = Math.min(end, f.size - 1);
+      if (start > end) {
+        reply.code(416).header('content-range', `bytes */${f.size}`);
+        return reply.send();
+      }
+      reply.code(206).header('content-range', `bytes ${start}-${end}/${f.size}`).header('content-length', end - start + 1);
+      return reply.send(fs.createReadStream(f.real, { start, end }));
+    }
+    reply.header('content-length', f.size);
+    return reply.send(fs.createReadStream(f.real));
+  });
+
   // WebSocket: 接続時に一覧を送り、以後はセッションの変化とイベントを流す。
   // 再接続した Web は、表示中のセッションについて /events?after=<最後の seq> で差分を取り直す。
   app.get('/ws', { websocket: true }, async (socket, req) => {
@@ -206,7 +247,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     // 見つからないファイルは下の NotFound ハンドラーに回る。
     await app.register(fastifyStatic, { root: opts.webDist, wildcard: true, index: ['index.html'] });
     app.setNotFoundHandler((req, reply) => {
-      if (req.method === 'GET' && !req.url.startsWith('/api/') && !req.url.startsWith('/ws')) {
+      if (req.method === 'GET' && !req.url.startsWith('/api/') && !req.url.startsWith('/ws') && !req.url.startsWith('/files/')) {
         reply.type('text/html').sendFile('index.html');
         return;
       }

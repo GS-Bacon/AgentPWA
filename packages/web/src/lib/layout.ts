@@ -7,6 +7,13 @@ export type LayoutMode = 'cols1' | 'cols2' | 'cols3' | 'grid4' | 'custom';
 export interface Pane {
   id: string;
   sessionId: string | null;
+  /** ビュワーのペイン（docs/architecture.md の 5.1）。このときの sessionId は null */
+  view?: { sessionId: string; path: string };
+}
+
+/** セッションもファイルも表示していないペイン */
+export function isEmptyPane(p: Pane): boolean {
+  return !p.sessionId && !p.view;
 }
 
 /** 自由分割（Web）: 列の並び。各列にペインを縦に積む。weight は相対的な大きさ。 */
@@ -135,7 +142,7 @@ export function closePane(s: LayoutState, paneId: string): LayoutState {
 }
 
 export function setPaneSession(s: LayoutState, paneId: string, sessionId: string | null): LayoutState {
-  return { ...s, panes: s.panes.map((p) => (p.id === paneId ? { ...p, sessionId } : p)), focused: paneId };
+  return { ...s, panes: s.panes.map((p) => (p.id === paneId ? { id: p.id, sessionId } : p)), focused: paneId };
 }
 
 /**
@@ -147,7 +154,7 @@ export function openSession(s: LayoutState, sessionId: string, isWaiting: (sessi
   if (existing) return { ...s, focused: existing.id };
   const target = s.panes.find((p) => p.id === s.focused) ?? s.panes[0];
   if (target.sessionId && isWaiting(target.sessionId)) {
-    const empty = s.panes.find((p) => !p.sessionId);
+    const empty = s.panes.find(isEmptyPane);
     if (empty) return setPaneSession(s, empty.id, sessionId);
     return addPane(s, sessionId);
   }
@@ -168,4 +175,29 @@ export function resizeWeights<T extends { weight: number }>(items: T[], i: numbe
   out[i] = { ...a, weight: na };
   out[i + 1] = { ...b, weight: total - na };
   return out;
+}
+
+/**
+ * ファイルをビュワーのペインで開く。同じセッションのビュワーのペインがあれば中身を差し替える（ペインを増やし続けない）。
+ * なければ、そのセッションのペインのすぐ後ろ（自由分割では右の列）に足す。フォーカスはビュワーに移す。
+ */
+export function openViewer(s: LayoutState, sessionId: string, path: string): LayoutState {
+  const existing = s.panes.find((p) => p.view?.sessionId === sessionId);
+  if (existing) {
+    return { ...s, panes: s.panes.map((p) => (p.id === existing.id ? { ...p, view: { sessionId, path } } : p)), focused: existing.id };
+  }
+  const p: Pane = { id: newId(), sessionId: null, view: { sessionId, path } };
+  const at = s.panes.findIndex((x) => x.sessionId === sessionId);
+  const panes = [...s.panes];
+  panes.splice(at < 0 ? panes.length : at + 1, 0, p);
+  let custom = s.custom;
+  const src = at < 0 ? undefined : s.panes[at];
+  const ci = src ? custom.findIndex((c) => c.rows.some((r) => r.paneId === src.id)) : -1;
+  if (ci >= 0) {
+    custom = [...custom];
+    const half = custom[ci].weight / 2;
+    custom[ci] = { ...custom[ci], weight: half };
+    custom.splice(ci + 1, 0, { id: newId('c'), weight: half, rows: [{ paneId: p.id, weight: 1 }] });
+  }
+  return { ...s, panes, custom, focused: p.id };
 }

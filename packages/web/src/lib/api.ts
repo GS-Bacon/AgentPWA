@@ -5,6 +5,7 @@ import type {
   CreateSessionRequest,
   DeleteSessionResult,
   DirListing,
+  FileInfo,
   FolderEntry,
   HubInfo,
   SessionSummary,
@@ -48,4 +49,6 @@ export const api = {
   dirs: (path?: string) => req<DirListing>('GET', `/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   /** プロジェクトを作る（Hub が設定ファイルの folders に書き足す） */
   createProject: (body: CreateProjectRequest) => req<FolderEntry>('POST', '/api/projects', body),
+  /** ファイルビュワー: プロジェクトのフォルダの下のファイルの情報（path は相対パスか絶対パス） */
+  fileInfo: (id: string, path: string) => req<FileInfo>('GET', `/api/sessions/${id}/file-info?path=${encodeURIComponent(path)}`),
 };

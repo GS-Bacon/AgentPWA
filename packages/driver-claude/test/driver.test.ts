@@ -107,6 +107,15 @@ describe('StreamMapper', () => {
     expect(u.events).toEqual([{ type: 'tool', toolId: 'toolu_1', name: 'Bash', summary: 'npm test', state: 'done', output: 'ok' }]);
   });
 
+  it('ファイルを対象にするツールは paths に対象ファイルを入れる', () => {
+    const m = new StreamMapper();
+    const input = { file_path: 'C:\\work\\slides\\index.html', content: '<html>\n</html>' };
+    const a = m.map({ type: 'assistant', message: { id: 'msg_3', content: [{ type: 'tool_use', id: 'toolu_2', name: 'Write', input }] } });
+    expect(a.events).toEqual([{ type: 'tool', toolId: 'toolu_2', name: 'Write', summary: 'C:\\work\\slides\\index.html +2', paths: ['C:\\work\\slides\\index.html'], state: 'running' }]);
+    const u = m.map({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_2', content: 'ok', is_error: false }] } });
+    expect(u.events[0]).toMatchObject({ paths: ['C:\\work\\slides\\index.html'], state: 'done' });
+  });
+
   it('result でターン終了を知らせる', () => {
     const m = new StreamMapper();
     expect(m.map({ type: 'result', subtype: 'success', is_error: false, result: 'done' }).turnEnded).toEqual({ isError: false, errors: [] });

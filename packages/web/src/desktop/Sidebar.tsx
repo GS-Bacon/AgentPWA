@@ -283,10 +283,10 @@ export function Rail({ layout, update, onSettings }: { layout: LayoutState; upda
         return (
           <button
             key={p.id}
-            aria-label={`ペイン${i + 1}${s ? ` ${s.title}` : '（空）'}`}
+            aria-label={`ペイン${i + 1}${s ? ` ${s.title}` : p.view ? ` ファイル ${p.view.path}` : '（空）'}`}
             onClick={() => update((l) => ({ ...l, focused: p.id }))}
             className={`btn${waiting ? ' btn-attention' : ''}`}
-            style={{ width: 44, height: 36, padding: 0, fontSize: 12, fontWeight: 600, borderStyle: s ? 'solid' : 'dashed', outline: focused ? '2px solid var(--link)' : undefined, outlineOffset: -2 }}
+            style={{ width: 44, height: 36, padding: 0, fontSize: 12, fontWeight: 600, borderStyle: s || p.view ? 'solid' : 'dashed', outline: focused ? '2px solid var(--link)' : undefined, outlineOffset: -2 }}
           >
             {i + 1}
           </button>

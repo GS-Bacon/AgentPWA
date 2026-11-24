@@ -9,7 +9,9 @@ import { DRAG_TYPE, isWaiting, Rail, Sidebar } from './Sidebar.tsx';
 import {
   addPane,
   closePane,
+  isEmptyPane,
   openSession,
+  openViewer,
   resizeWeights,
   setPaneSession,
   splitBelow,
@@ -24,6 +26,8 @@ import { AutoWarn, ConnState, SessionMenu, StatusLabel } from '../components/com
 import { SessionView } from '../components/SessionView.tsx';
 import { NewSessionForm } from '../components/NewSession.tsx';
 import { Settings } from '../components/Settings.tsx';
+import { FileViewer } from '../components/FileViewer.tsx';
+import { onOpenFile } from '../lib/viewer.ts';
 import { AgentIcon, IconClose, IconMaximize, IconSidebar, IconSplitDown, IconSplitRight, LayoutIcons } from '../components/Icons.tsx';
 
 const MODES: { mode: LayoutMode; label: string }[] = [
@@ -41,6 +45,11 @@ const COLS: Record<Exclude<LayoutMode, 'custom'>, { cols: number; rows: number }
 };
 
 // ---- ペイン ----
+
+/** ペインが表示しているセッション（ビュワーのペインは、開いたファイルのセッション） */
+function paneSession(p: Pane): string | null {
+  return p.sessionId ?? p.view?.sessionId ?? null;
+}
 
 function PaneView({
   pane,
@@ -77,6 +86,46 @@ function PaneView({
   };
 
   const quick = sortedSessions(sessions).filter((x) => !layout.panes.some((p) => p.sessionId === x.id)).slice(0, 6);
+
+  const paneButtons = (
+    <>
+      <button className="btn btn-ghost btn-icon-sm" aria-label={maximized ? '元に戻す' : '最大化'} title={maximized ? '元に戻す' : '最大化'} onClick={() => setMaximized(maximized ? null : pane.id)}>
+        <IconMaximize size={14} />
+      </button>
+      <button
+        className="btn btn-ghost btn-icon-sm"
+        aria-label="ペインを閉じる"
+        title="ペインを閉じる"
+        onClick={() => {
+          if (maximized) setMaximized(null);
+          update((l) => closePane(l, pane.id));
+        }}
+      >
+        <IconClose size={14} />
+      </button>
+    </>
+  );
+
+  // ビュワーのペイン（docs/architecture.md の 5.1）
+  if (pane.view) {
+    return (
+      <section
+        data-pane={pane.id}
+        aria-label={`ペイン${index + 1}（ファイル）`}
+        tabIndex={-1}
+        onMouseDownCapture={() => !focused && update((l) => ({ ...l, focused: pane.id }))}
+        onFocusCapture={() => !focused && update((l) => ({ ...l, focused: pane.id }))}
+        style={{ minWidth: 0, minHeight: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', scrollSnapAlign: 'start', height: '100%' }}
+      >
+        <FileViewer
+          sessionId={pane.view.sessionId}
+          path={pane.view.path}
+          lead={<span className="pane-tag" style={focused ? { borderColor: 'var(--link)', color: 'var(--fg)' } : undefined}>{index + 1}</span>}
+          trail={paneButtons}
+        />
+      </section>
+    );
+  }
 
   return (
     <section
@@ -131,20 +180,7 @@ function PaneView({
             </button>
           </>
         )}
-        <button className="btn btn-ghost btn-icon-sm" aria-label={maximized ? '元に戻す' : '最大化'} title={maximized ? '元に戻す' : '最大化'} onClick={() => setMaximized(maximized ? null : pane.id)}>
-          <IconMaximize size={14} />
-        </button>
-        <button
-          className="btn btn-ghost btn-icon-sm"
-          aria-label="ペインを閉じる"
-          title="ペインを閉じる"
-          onClick={() => {
-            if (maximized) setMaximized(null);
-            update((l) => closePane(l, pane.id));
-          }}
-        >
-          <IconClose size={14} />
-        </button>
+        {paneButtons}
       </header>
       {s ? (
         <SessionView key={s.id} session={s} focused={focused} />
@@ -289,18 +325,29 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
     const closeFor = (ids: Set<string>) => {
       update((l) => {
         let next = l;
-        for (const p of l.panes) if (p.sessionId && ids.has(p.sessionId)) next = closePane(next, p.id);
+        for (const p of l.panes) if (paneSession(p) && ids.has(paneSession(p) as string)) next = closePane(next, p.id);
         return next;
       });
-      setMaximized((m) => (m && layoutRef.current.panes.some((p) => p.id === m && p.sessionId && ids.has(p.sessionId)) ? null : m));
+      setMaximized((m) => (m && layoutRef.current.panes.some((p) => p.id === m && paneSession(p) && ids.has(paneSession(p) as string)) ? null : m));
     };
-    // 開いていない間に削除されたセッションのペインも閉じる
+    // 開いていない間に削除されたセッションのペインも閉じる（そのセッションのビュワーのペインも）
     const known = getState().sessions;
-    const missing = layoutRef.current.panes.filter((p) => p.sessionId && !known[p.sessionId]).map((p) => p.sessionId as string);
+    const missing = layoutRef.current.panes.map(paneSession).filter((id): id is string => !!id && !known[id]);
     if (missing.length) closeFor(new Set(missing));
     return onSessionsClosed((ids) => closeFor(new Set(ids)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 会話の中のパスをタップしたら、ビュワーのペインで開く
+  useEffect(
+    () =>
+      onOpenFile((sessionId, path) => {
+        setMaximized(null);
+        update((l) => openViewer(l, sessionId, path));
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const nextWaiting = useCallback(() => {
     update((l) => {
@@ -433,7 +480,7 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
             setNewSession(null);
             update((l) => {
               const target = l.panes.find((p) => p.id === l.focused);
-              return target && !target.sessionId ? setPaneSession(l, target.id, s.id) : addPane(l, s.id);
+              return target && isEmptyPane(target) ? setPaneSession(l, target.id, s.id) : addPane(l, s.id);
             });
           }}
         />

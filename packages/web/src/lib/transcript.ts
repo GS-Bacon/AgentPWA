@@ -10,6 +10,8 @@ export interface ToolItem {
   toolId: string;
   name: string;
   summary: string;
+  /** 対象ファイルのパス（ファイルビュワーで開く） */
+  paths?: string[];
   state: 'running' | 'done' | 'failed';
   output?: string;
 }
@@ -60,12 +62,12 @@ export function buildItems(events: SessionEvent[]): Item[] {
         break;
       }
       case 'tool': {
-        const tool: ToolItem = { toolId: ev.toolId, name: ev.name, summary: ev.summary, state: ev.state, output: ev.output };
+        const tool: ToolItem = { toolId: ev.toolId, name: ev.name, summary: ev.summary, paths: ev.paths, state: ev.state, output: ev.output };
         const pos = toolIndex.get(ev.toolId);
         if (pos) {
           const it = items[pos.item] as Extract<Item, { kind: 'tools' }>;
           const tools = [...it.tools];
-          tools[pos.tool] = { ...tools[pos.tool], ...tool, output: tool.output ?? tools[pos.tool].output };
+          tools[pos.tool] = { ...tools[pos.tool], ...tool, paths: tool.paths ?? tools[pos.tool].paths, output: tool.output ?? tools[pos.tool].output };
           items[pos.item] = { ...it, tools };
           break;
         }

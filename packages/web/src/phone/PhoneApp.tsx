@@ -13,12 +13,15 @@ import { AutoWarn, ConnState, SessionMenu, StatusLabel } from '../components/com
 import { SessionView } from '../components/SessionView.tsx';
 import { NewSessionForm } from '../components/NewSession.tsx';
 import { Settings } from '../components/Settings.tsx';
+import { FileViewer } from '../components/FileViewer.tsx';
+import { onOpenFile } from '../lib/viewer.ts';
 import { AgentIcon, IconBack, IconGear, IconPlus } from '../components/Icons.tsx';
 
 type Route =
   | { name: 'list'; project: string | null }
   | { name: 'settings' }
   | { name: 'session'; id: string }
+  | { name: 'file'; id: string; path: string }
   | { name: 'new'; cwd?: string };
 
 function parse(hash: string): Route {
@@ -26,6 +29,7 @@ function parse(hash: string): Route {
   const [, a, b] = path.split('/');
   if (a === 'settings') return { name: 'settings' };
   if (a === 's' && b) return { name: 'session', id: b };
+  if (a === 'f' && b) return { name: 'file', id: b, path: new URLSearchParams(query).get('path') ?? '' };
   if (a === 'p' && b) return { name: 'list', project: decodeURIComponent(b) };
   if (a === 'new') return { name: 'new', cwd: new URLSearchParams(query).get('cwd') ?? undefined };
   return { name: 'list', project: null };
@@ -429,12 +433,29 @@ export function PhoneApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProps)
     () =>
       onSessionsClosed((ids) => {
         const r = routeRef.current;
-        if (r.name === 'session' && ids.includes(r.id)) goRef.current('#/', true);
+        if ((r.name === 'session' || r.name === 'file') && ids.includes(r.id)) goRef.current('#/', true);
       }),
     [],
   );
+  // 会話の中のパスをタップしたら、全画面のビュワーを重ねて開く（戻るで会話に戻る）
+  useEffect(() => onOpenFile((sid, path) => goRef.current(`#/f/${sid}?path=${encodeURIComponent(path)}`)), []);
 
   if (route.name === 'session') return <DetailScreen id={route.id} back={back} />;
+  if (route.name === 'file') {
+    return (
+      <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)', paddingTop: 'var(--safe-top)', paddingBottom: 'var(--safe-bottom)' }}>
+        <FileViewer
+          sessionId={route.id}
+          path={route.path}
+          lead={
+            <button className="btn btn-ghost" aria-label="閉じる" onClick={back} style={{ width: 44, height: 44, padding: 0, color: 'var(--fg)', flex: 'none' }}>
+              <IconBack size={20} />
+            </button>
+          }
+        />
+      </div>
+    );
+  }
   if (route.name === 'new') {
     return <NewSessionForm cwd={route.cwd} fullscreen onClose={back} onCreated={(s) => go(`#/s/${s.id}`, true)} />;
   }

@@ -36,6 +36,7 @@ starting ──► running ──► idle ──(send)──► running
 3. **プロセス管理**: `stop()` では子プロセスを確実に終了させ、最後に `status: stopped` を送る。CLI が勝手に落ちたら `error`（復帰できるなら `fatal: false`）を送る。
 4. **ID**: `messageId` / `toolId` / `requestId` は、セッション内で一意な文字列にする。エージェントの ID をそのまま使ってよい。
 5. **権限モード**: `PermissionMode` を、エージェント固有の設定に対応付ける。対応する設定がないモードは `ask` として扱い、`error`（`fatal: false`）で理由を知らせる。詳しくは「3.1 権限モードの切り替え」を参照。
+6. **ツールの対象ファイル**: ファイルを読む・書く・変えるツールの `tool` イベントには、対象ファイルのパスを `paths` に入れる（作業フォルダからの相対パスか絶対パス）。Web はこれを使ってファイルビュワーで開く。分からないときは省いてよい。同じ `toolId` の続きのイベントでは省いてもよい（Hub と Web は最初の値を使い続ける）。
 
 ### 3.1 権限モードの切り替え
 
@@ -93,6 +94,7 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | 自動承認（`auto`） | Claude Code の auto モード（安全判定の分類器が操作ごとに許可を決める）を使う。プランやモデルの条件で使えないときは、CLI が返すエラーを `error`（`fatal: false`）で知らせて元のモードのままにする。分類器が止めた操作が `can_use_tool` で届いたときは、通常どおり `approval_request` にする |
 | モデル・エフォート（起動時） | `--model <model>` と `--effort <level>`（`low` / `medium` / `high` / `xhigh` / `max`。プロトコルの値そのまま）。省略は付けない。起動したら（プロセスを起動する前に）`model` を送る |
 | モデル・エフォート（実行中） | プロセスが動いていれば、モデルは `{"type":"control_request","request_id":…,"request":{"subtype":"set_model","model":…}}`（既定に戻すときは `model` を省く）、エフォートは `{"subtype":"apply_flag_settings","settings":{"effortLevel":…}}`（既定に戻すときは `null`）を送る。`control_response` の success で反映とみなす（実行中のターンも次の API 呼び出しから効く）。知らないモデルは error（`Model '…' not found`）が返るので、`error`（`fatal: false`）を送り元のモデルのままにする。プロセスが止まっていれば、次の起動の `--model` / `--effort` に使う。`model` イベントの値は Driver が頼んだ値（エイリアスのまま）で、CLI が解決した正式名ではない |
+| ツールの対象ファイル（`paths`） | `Read` / `Write` / `Edit` / `MultiEdit` の `file_path`、`NotebookEdit` の `notebook_path`（CLI が渡す絶対パスのまま） |
 | モードの通知 | stream-json の `system/init` と `system/status` の `permissionMode` を、上の対応の逆で `permission_mode` にして送る（計画モードの終了など、CLI 自身による変更もここで届く） |
 | 履歴の削除（`deleteHistory`） | `~/.claude/projects/<cwd の英数字以外を - に置き換えた名前>/<session_id>.jsonl` と、同名のフォルダ（あれば）を消す。`claude --resume` の一覧からも消える |
 | 認証の確認 | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` / `CLAUDE_CODE_USE_FOUNDRY` があれば `api_key`。無ければ `claude auth status`（JSON）の `authMethod` を見て、`claude.ai` / `oauth_token` は `subscription`、`api_key` / `api_key_helper` / `third_party` は `api_key`。起動後も system/init の `apiKeySource` が `none` 以外なら、エラー（fatal）を出して止める |
@@ -112,6 +114,15 @@ Codex 担当で、次を対応してください（プロトコル v4。3.2 を�
 - `StartOptions.model` / `effort` を `thread/start`（または `turn/start`）のモデル・推論の深さ（reasoning effort）に対応付け、起動後に `model` イベントを送る
 - `set_model` を受けたら反映し、`model` イベントを送る。`turn/start` ごとに指定するなら「次のターンから反映」と対応表に書く
 - Codex に無いエフォート（例: `max`）は `error`（`fatal: false`）で知らせる。Web の選択肢は `packages/web/src/lib/models.ts` の `EFFORTS.codex`（いまは `low` / `medium` / `high` / `xhigh`）と `MODELS.codex`（いまは既定だけ）なので、選べるモデルとエフォートが決まったら知らせてください（Claude 側で直します）
+
+### Codex への依頼（ツールの対象ファイル）
+
+Codex 担当で、次を対応してください（プロトコル v5。3章6を参照）。
+- ファイル変更など、ファイルを対象にする項目の `tool` イベントに `paths` を入れ、対応表に書く
+
+### Codex への依頼（運用ルールの変更）
+
+`packages/shared` の変更に専用のブランチと PR を作る決まりと、ブランチ名の決まり（`claude/*` / `codex/*` / `protocol/*`）をなくしました（CLAUDE.md と docs/architecture.md は変更済み）。`packages/shared` は直接変えてよく、変えたらこの文書の変更履歴に追記し、相手側の対応が要るものは依頼の節に書きます。AGENTS.md の該当箇所（`packages/shared/**` の項と、ブランチ名の項）を同じ内容に直してください。
 
 ### Codex への依頼（セッションの削除）
 
@@ -136,3 +147,4 @@ Codex 担当で、次を対応してください（プロトコル v4。3.2 を�
 | 2026-11-24 | 2 | 権限モード `full_auto` を追加。実行中の切り替え（`UserAction` の `set_permission_mode`）と、現在のモードの通知（`DriverEvent` の `permission_mode`）を追加 | Claude |
 | 2026-11-24 | 3 | 権限モード `auto`（自動承認）を追加。セッションのアーカイブと削除（3.2）と、`AgentDriver.deleteHistory`（任意）を追加 | Claude |
 | 2026-11-24 | 4 | エフォート（`EffortLevel` / `EFFORT_LEVELS`、`StartOptions.effort`）を追加。実行中のモデルとエフォートの切り替え（`UserAction` の `set_model`）と、現在の設定の通知（`DriverEvent` の `model`）を追加（3.2。アーカイブと削除は 3.3 に移動） | Claude |
+| 2026-11-24 | 5 | `tool` イベントに `paths`（ツールの対象ファイルのパス。省略可）を追加（3章6。ファイルビュワー用） | Claude |

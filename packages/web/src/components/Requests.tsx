@@ -6,6 +6,7 @@ import { api } from '../lib/api.ts';
 import { run } from '../lib/store.ts';
 import { elapsed, relPath } from '../lib/format.ts';
 import { diffLines } from '../lib/transcript.ts';
+import { openFile } from '../lib/viewer.ts';
 
 export function useNow(intervalMs = 30_000): number {
   const [now, setNow] = useState(Date.now());
@@ -29,7 +30,7 @@ export function decide(sessionId: string, requestId: string, decision: ApprovalD
   return run(() => api.action(sessionId, { type: 'approve', requestId, decision, note }));
 }
 
-function Files({ changes, open = false, cwd }: { changes: FileChange[]; open?: boolean; cwd: string }) {
+function Files({ changes, open = false, cwd, sessionId }: { changes: FileChange[]; open?: boolean; cwd: string; sessionId: string }) {
   const add = changes.reduce((n, c) => n + (c.additions ?? 0), 0);
   const del = changes.reduce((n, c) => n + (c.deletions ?? 0), 0);
   return (
@@ -44,7 +45,21 @@ function Files({ changes, open = false, cwd }: { changes: FileChange[]; open?: b
         <details key={c.path} className="file" open={open && changes.length === 1}>
           <summary>
             <span className="ellipsis">{relPath(c.path, cwd)}</span>
-            <span style={{ flex: 'none' }}>
+            <span style={{ flex: 'none', display: 'inline-flex', gap: 8, alignItems: 'baseline' }}>
+              {/* いまのファイルをビュワーで開く（新しく作るファイルは、まだ無いので出さない） */}
+              {c.kind !== 'add' && (
+                <button
+                  className="path-link"
+                  title="いまのファイルをビュワーで開く"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openFile(sessionId, c.path);
+                  }}
+                >
+                  開く
+                </button>
+              )}
               {c.additions !== undefined && <span className="add">+{c.additions}</span>}{' '}
               {c.deletions !== undefined && <span className="del">−{c.deletions}</span>}
             </span>
@@ -82,7 +97,7 @@ export function ApprovalInline({ session, req }: { session: SessionSummary; req:
           {req.command}
         </div>
       )}
-      {req.changes && <Files changes={req.changes} cwd={session.cwd} />}
+      {req.changes && <Files changes={req.changes} cwd={session.cwd} sessionId={session.id} />}
       <div className="btn-pair">
         <button className="btn btn-lg" disabled={busy} onClick={() => act('deny')}>
           拒否
@@ -115,7 +130,7 @@ export function ApprovalCard({ session, req, focused }: { session: SessionSummar
       </div>
       <div className="ask-body">
         {req.command && <div className="codebox">{req.command}</div>}
-        {req.changes && req.changes.length > 0 && <Files changes={req.changes} open cwd={session.cwd} />}
+        {req.changes && req.changes.length > 0 && <Files changes={req.changes} open cwd={session.cwd} sessionId={session.id} />}
         {req.cwd && <p className="mono muted" style={{ fontSize: 11 }}>{req.cwd}</p>}
         {denying ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

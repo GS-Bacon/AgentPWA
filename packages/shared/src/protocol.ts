@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -110,6 +110,11 @@ export type DriverEvent =
       name: string;
       /** 一行要約。例: 'npm test -- api' / 'src/api.ts +6 −4' */
       summary: string;
+      /**
+       * ツールが対象にしたファイルのパス（作業フォルダからの相対パスか絶対パス）。
+       * Web のファイルビュワーで開くために使う。分かる場合だけ入れる。
+       */
+      paths?: string[];
       state: 'running' | 'done' | 'failed';
       output?: string;
     }
