@@ -70,7 +70,8 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | プロトコル | Claude Code 側 |
 |---|---|
 | 起動 | `claude -p --output-format stream-json --input-format stream-json --verbose` |
-| 許可要求 | `--permission-prompt-tool`（Hub 内の MCP ツール）経由で受けて、`approval_request` に変換する |
+| 許可要求 | 標準入出力の制御メッセージで受ける（`--permission-prompt-tool stdio` と、CLI から届く `control_request` の `can_use_tool` を想定。フラグ名と形式は実装時に CLI で確認する）。受けたら `approval_request` に変換し、決定は `control_response` で返す。SSH 先の CLI からは Hub 内の MCP ツールに届かないため、MCP ツールは使わず、ローカルでもこの方式にそろえる（docs/architecture.md の 6.4） |
+| 起動場所 | Driver は子プロセスを自分で起動せず、Hub から渡される起動役（`local` / `ssh`）で起動する（v4 で共通プロトコルに入れる予定。docs/architecture.md の 6.6） |
 | 再開 | `--resume <session_id>`（`resume_token` = session_id） |
 | 中断 | 実装時に確定する |
 | 権限モード（起動時） | `--permission-mode`: `ask`→`default`、`auto_edit`→`acceptEdits`、`auto`→`auto`、`full_auto`→`bypassPermissions`、`plan`→`plan` |
