@@ -341,11 +341,12 @@ export async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
   }
 }
 
-/** 一覧で使う: エージェントごとの並べ替え済みセッション（Hub と同じ規則で並べる）。 */
+/** 一覧で使う: エージェントごとの並べ替え済みセッション（Hub と同じ規則で並べる。ピン止めが先頭、その中と残りは順位の順）。 */
 export function sortedSessions(sessions: Record<string, SessionSummary>, agent?: AgentKind, includeArchived = false): SessionSummary[] {
   return Object.values(sessions)
     .filter((s) => (!agent || s.agent === agent) && (includeArchived || !s.archived))
     .sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       if (a.rank !== b.rank) return a.rank - b.rank;
       if (a.rank === 5) return b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
       return a.statusSince.localeCompare(b.statusSince) || a.id.localeCompare(b.id);

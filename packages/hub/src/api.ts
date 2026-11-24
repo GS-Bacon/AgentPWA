@@ -9,6 +9,7 @@ export type UsageInfo = Extract<DriverEvent, { type: 'usage' }>;
 /**
  * 表示の優先順位（docs/architecture.md「表示の優先順位」）。
  * 1 許可待ち / 2 質問待ち / 3 完了・未読 / 4 実行中 / 5 アイドル・停止
+ * 一覧では、ピン止め（pinned）したものを順位にかかわらず先に出す。
  */
 export type Rank = 1 | 2 | 3 | 4 | 5;
 
@@ -35,7 +36,12 @@ export interface SessionSummary {
   updatedAt: string;
   lastSeq: number;
   readSeq: number;
+  /** 未読か（ターンが終わってまだ読んでいないか、「未読にする」で印を付けた） */
   unread: boolean;
+  /** 「未読にする」で付けた印があるか（開いて既読にすると外れる） */
+  markedUnread: boolean;
+  /** ピン止め（一覧の先頭に出す） */
+  pinned: boolean;
   rank: Rank;
   /** 再開できるか（resume_token を受け取っているか） */
   resumable: boolean;
@@ -167,6 +173,10 @@ export interface CreateSessionRequest {
 export interface UpdateSessionRequest {
   title?: string;
   archived?: boolean;
+  /** ピン止めする・外す */
+  pinned?: boolean;
+  /** true で「未読にする」（印を付ける）、false で既読にする（最新まで読んだことにする） */
+  unread?: boolean;
 }
 
 /** DELETE /api/sessions/:id の応答 */

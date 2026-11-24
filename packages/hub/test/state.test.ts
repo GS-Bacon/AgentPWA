@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DriverEvent, SessionEvent } from '@agentpwa/shared';
-import { applyEvent, isUnread, markRead, newRecord, rankOf, recoverAfterRestart, sortRecords, titleFromPrompt, type SessionRecord } from '../src/state.ts';
+import { applyEvent, isUnread, markRead, markUnread, newRecord, rankOf, recoverAfterRestart, sortRecords, titleFromPrompt, type SessionRecord } from '../src/state.ts';
 
 function rec(id = 's1', now = '2026-11-24T00:00:00.000Z'): SessionRecord {
   return newRecord({ id, agent: 'claude', title: 't', cwd: 'C:\\w', folderName: 'w', permissionMode: 'ask', now, started: true });
@@ -126,6 +126,20 @@ describe('既読管理', () => {
     const same = markRead(r, 1);
     expect(same).toBe(r);
   });
+
+  it('「未読にする」で印を付けると、既読のアイドルも停止も未読になり、既読にすると外れる', () => {
+    for (const status of ['idle', 'stopped'] as const) {
+      let r = markRead(play(rec(), [{ type: 'status', status: 'running' }, { type: 'status', status }]));
+      expect(isUnread(r)).toBe(false);
+      r = markUnread(r);
+      expect(isUnread(r)).toBe(true);
+      expect(rankOf(r)).toBe(3);
+      // 新しいイベントが無くても、既読にすれば印は外れる
+      r = markRead(r);
+      expect(r.markedUnread).toBe(false);
+      expect(rankOf(r)).toBe(5);
+    }
+  });
 });
 
 describe('並べ替え', () => {
@@ -151,6 +165,16 @@ describe('並べ替え', () => {
     const old = play(rec('old'), [{ type: 'status', status: 'stopped' }], 1);
     const recent = play(rec('recent'), [{ type: 'status', status: 'stopped' }], 50);
     expect(sortRecords([old, recent]).map((r) => r.id)).toEqual(['recent', 'old']);
+  });
+
+  it('ピン止めは順位にかかわらず先頭、その次に未読', () => {
+    const approval = play(rec('approval'), [{ type: 'status', status: 'waiting_approval' }]);
+    const pinnedIdle = { ...play(rec('pinned-idle'), [{ type: 'status', status: 'stopped' }]), pinned: true };
+    const pinnedRunning = { ...play(rec('pinned-running'), [{ type: 'status', status: 'running' }]), pinned: true };
+    const marked = markUnread(play(rec('marked'), [{ type: 'status', status: 'stopped' }]));
+    const idle = play(rec('idle'), [{ type: 'status', status: 'stopped' }], 40);
+    const sorted = sortRecords([idle, marked, approval, pinnedIdle, pinnedRunning]).map((r) => r.id);
+    expect(sorted).toEqual(['pinned-running', 'pinned-idle', 'approval', 'marked', 'idle']);
   });
 });
 

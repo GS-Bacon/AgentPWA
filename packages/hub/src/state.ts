@@ -31,6 +31,10 @@ export interface SessionRecord {
    * 画面で閉じたときや Hub の起動時に消す。古い記録には無いので、読み込み時に補う（normalizeRecord）
    */
   started: boolean;
+  /** ピン止め（一覧の先頭に出す）。古い記録には無い */
+  pinned?: boolean;
+  /** ユーザーが「未読にする」で付けた印。既読にすると外れる。古い記録には無い */
+  markedUnread?: boolean;
   /** このセッションを作った AI のセッション（AI が Hub の API で作ったときだけ） */
   parentSessionId?: string;
   activity?: string;
@@ -158,8 +162,9 @@ export function normalizeRecord(rec: SessionRecord): SessionRecord {
   return { ...rec, started: rec.title !== DEFAULT_TITLE };
 }
 
-export function isUnread(rec: Pick<SessionRecord, 'status' | 'turnEndSeq' | 'readSeq'>): boolean {
-  return rec.status === 'idle' && rec.turnEndSeq > rec.readSeq;
+/** 未読か: ターンが終わってまだ読んでいない（idle のとき）か、ユーザーが「未読にする」で印を付けた */
+export function isUnread(rec: Pick<SessionRecord, 'status' | 'turnEndSeq' | 'readSeq' | 'markedUnread'>): boolean {
+  return Boolean(rec.markedUnread) || (rec.status === 'idle' && rec.turnEndSeq > rec.readSeq);
 }
 
 export function rankOf(rec: SessionRecord): Rank {
@@ -174,16 +179,18 @@ export function rankOf(rec: SessionRecord): Rank {
     case 'starting':
       return 4;
     default:
-      return 5;
+      // 停止・エラーでも、「未読にする」で印を付けたものは未読に入れる
+      return isUnread(rec) ? 3 : 5;
   }
 }
 
 /**
  * 並べ替えの比較関数。
- * 順位の小さい順。同じ順位の中では待ちが長い順（statusSince の古い順）。
+ * ピン止めしたものを先に出す。ピン止めの中と残りの中では、それぞれ順位の小さい順。同じ順位の中では待ちが長い順（statusSince の古い順）。
  * ただし 5（アイドル・停止）は「待ち」ではないので、最近動いた順にする。
  */
 export function compareRecords(a: SessionRecord, b: SessionRecord): number {
+  if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
   const ra = rankOf(a);
   const rb = rankOf(b);
   if (ra !== rb) return ra - rb;
@@ -195,11 +202,17 @@ export function sortRecords(list: SessionRecord[]): SessionRecord[] {
   return [...list].sort(compareRecords);
 }
 
-/** 既読にする。seq を省略すると最新まで読んだことにする。 */
+/** 既読にする。seq を省略すると最新まで読んだことにする。「未読にする」の印も外す。 */
 export function markRead(rec: SessionRecord, seq?: number): SessionRecord {
   const target = Math.min(seq ?? rec.lastSeq, rec.lastSeq);
-  if (target <= rec.readSeq) return rec;
-  return { ...rec, readSeq: target };
+  if (target <= rec.readSeq && !rec.markedUnread) return rec;
+  return { ...rec, readSeq: Math.max(rec.readSeq, target), markedUnread: false };
+}
+
+/** 「未読にする」の印を付ける（開いて既読にするまで、一覧で未読として扱う） */
+export function markUnread(rec: SessionRecord): SessionRecord {
+  if (rec.markedUnread) return rec;
+  return { ...rec, markedUnread: true };
 }
 
 /**
@@ -236,6 +249,8 @@ export function toSummary(rec: SessionRecord, extra: { machine: string; live: bo
     lastSeq: rec.lastSeq,
     readSeq: rec.readSeq,
     unread: isUnread(rec),
+    markedUnread: Boolean(rec.markedUnread),
+    pinned: Boolean(rec.pinned),
     rank: rankOf(rec),
     resumable: Boolean(rec.resumeToken),
     live: extra.live,

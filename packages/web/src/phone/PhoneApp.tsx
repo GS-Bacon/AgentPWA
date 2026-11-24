@@ -7,9 +7,9 @@ import { discardIfEmpty, onSessionCreatedByAgent, onSessionsClosed, sortedSessio
 import type { ArchiveSectionProps } from '../App.tsx';
 import { elapsed, projectHeadStyle, shortPath, timeLabel } from '../lib/format.ts';
 import { archivedSessions, buildProjects, findProject, useProjectColor, type Project } from '../lib/projects.ts';
-import { archiveSession, deleteSession, unarchiveSession } from '../lib/sessionActions.ts';
+import { archiveSession, deleteSession, setPinned, setUnread, unarchiveSession } from '../lib/sessionActions.ts';
 import { ApprovalInline, useNow } from '../components/Requests.tsx';
-import { AutoWarn, ConnState, SessionMenu, StatusLabel } from '../components/common.tsx';
+import { AutoWarn, ConnState, PinMark, SessionMenu, ShowMoreButton, StatusLabel, useShowMore } from '../components/common.tsx';
 import { SessionView } from '../components/SessionView.tsx';
 import { NewSessionForm } from '../components/NewSession.tsx';
 import { Settings } from '../components/Settings.tsx';
@@ -67,6 +67,7 @@ function PhoneRow({ s, now, onOpen, showProject }: { s: SessionSummary; now: num
         <div className="row-top">
           <StatusLabel s={s} />
           <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <PinMark s={s} />
             <AutoWarn s={s} />
             <span className="muted">{timeLabel(s, now)}</span>
           </span>
@@ -98,13 +99,14 @@ function PhoneRow({ s, now, onOpen, showProject }: { s: SessionSummary; now: num
           )}
         </span>
       </div>
+      <PinMark s={s} />
       <AutoWarn s={s} />
       <span className="muted" style={{ fontSize: 12, flex: 'none' }}>{s.archived ? elapsed(s.updatedAt, now) : timeLabel(s, now)}</span>
     </div>
   );
 }
 
-const SWIPE_BTN_W = 88;
+const SWIPE_BTN_W = 72;
 
 interface SwipeAction {
   label: string;
@@ -113,7 +115,7 @@ interface SwipeAction {
 }
 
 /**
- * 左にスワイプすると操作のボタン（アーカイブ・削除）が出る行。
+ * 左にスワイプすると操作のボタン（ピン止め・未読・アーカイブ・削除）が出る行。
  * 縦のスクロールはブラウザに任せ（touch-action: pan-y）、横の動きだけを扱う。開いている行は1つだけ。
  */
 function SwipeRow({ id, openId, setOpenId, actions, children }: { id: string; openId: string | null; setOpenId: (id: string | null) => void; actions: SwipeAction[]; children: React.ReactNode }) {
@@ -266,6 +268,8 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
               { label: '削除', onClick: () => void deleteSession(s.id), danger: true },
             ]
           : [
+              s.pinned ? { label: 'ピン止めを外す', onClick: () => void setPinned(s.id, false) } : { label: 'ピン止め', onClick: () => void setPinned(s.id, true) },
+              s.unread ? { label: '既読にする', onClick: () => void setUnread(s.id, false) } : { label: '未読にする', onClick: () => void setUnread(s.id, true) },
               { label: 'アーカイブ', onClick: () => void archiveSession(s.id) },
               { label: '削除', onClick: () => void deleteSession(s.id), danger: true },
             ]
@@ -275,9 +279,14 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
     </SwipeRow>
   );
   const total = waitingCount(sessions);
-  const mine = list.filter((s) => s.rank <= 3);
-  const running = list.filter((s) => s.rank === 4);
-  const idle = list.filter((s) => s.rank === 5);
+  // ピン止めを先頭にまとめ、残りを「あなたの番 / 実行中 / アイドル」に分ける。アイドルとアーカイブ済みは多いと長いので、LIST_PAGE 件ずつ出す
+  const pinned = list.filter((s) => s.pinned);
+  const rest = list.filter((s) => !s.pinned);
+  const mine = rest.filter((s) => s.rank <= 3);
+  const running = rest.filter((s) => s.rank === 4);
+  const idle = rest.filter((s) => s.rank === 5);
+  const idlePage = useShowMore(idle);
+  const archivedPage = useShowMore(archived);
   const newHash = project ? `#/new?cwd=${encodeURIComponent(project.path)}` : '#/new';
   const canCreate = !project || project.registered;
   return (
@@ -328,12 +337,15 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
             )}
           </div>
         )}
+        {pinned.length > 0 && <h2 className="list-heading">ピン止め · {pinned.length}</h2>}
+        {pinned.map(row)}
         {mine.length > 0 && <h2 className="list-heading">あなたの番 · {mine.length}</h2>}
         {mine.map(row)}
         {running.length > 0 && <h2 className="list-heading">実行中 · {running.length}</h2>}
         {running.map(row)}
         {idle.length > 0 && <h2 className="list-heading">アイドル · {idle.length}</h2>}
-        {idle.map(row)}
+        {idlePage.shown.map(row)}
+        <ShowMoreButton rest={idlePage.rest} onClick={idlePage.more} className="show-more show-more-lg" />
         {archived.length > 0 && (
           <>
             <button className="list-heading archive-toggle" aria-expanded={archivedOpen} onClick={() => setArchivedOpen(!archivedOpen)}>
@@ -342,7 +354,12 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
               </span>
               アーカイブ済み（{archived.length}）
             </button>
-            {archivedOpen && archived.map(row)}
+            {archivedOpen && (
+              <>
+                {archivedPage.shown.map(row)}
+                <ShowMoreButton rest={archivedPage.rest} onClick={archivedPage.more} className="show-more show-more-lg" />
+              </>
+            )}
           </>
         )}
       </main>

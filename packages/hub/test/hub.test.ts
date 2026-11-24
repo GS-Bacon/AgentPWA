@@ -410,6 +410,28 @@ describe('アーカイブと削除', () => {
   });
 });
 
+describe('ピン止めと未読', () => {
+  it('ピン止めは一覧の先頭に来て、未読の印は既読にすると外れる。どちらも再起動後も残る', async () => {
+    const first = setup();
+    const a = await first.manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'a' });
+    const b = await first.manager.create({ cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'b' });
+    await first.manager.stop(a.id);
+    await first.manager.stop(b.id);
+    expect(await first.manager.update(a.id, { pinned: true })).toMatchObject({ pinned: true });
+    expect(await first.manager.update(b.id, { unread: true })).toMatchObject({ unread: true, markedUnread: true, rank: 3 });
+    expect(first.manager.list().map((s) => s.id)).toEqual([a.id, b.id]);
+    first.store.close();
+
+    const second = setup(new TestDriver());
+    expect(second.manager.get(a.id).pinned).toBe(true);
+    expect(second.manager.get(b.id).markedUnread).toBe(true);
+    // 開いて既読にすると印が外れる（新しいイベントが無くても）
+    expect(second.manager.read(b.id)).toMatchObject({ unread: false, markedUnread: false, rank: 5 });
+    expect(await second.manager.update(a.id, { pinned: false })).toMatchObject({ pinned: false });
+    second.store.close();
+  });
+});
+
 describe('設定ファイル', () => {
   const write = (folders: unknown[]) => {
     const file = path.join(dir, 'config.json');

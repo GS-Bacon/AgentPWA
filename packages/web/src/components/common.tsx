@@ -4,9 +4,9 @@ import type { AgentKind } from '@agentpwa/shared';
 import type { SessionSummary, UsageInfo } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { dismissToast, run, useStore } from '../lib/store.ts';
-import { archiveSession, deleteSession, unarchiveSession } from '../lib/sessionActions.ts';
+import { archiveSession, deleteSession, setPinned, setUnread, unarchiveSession } from '../lib/sessionActions.ts';
 import { elapsed, statusView } from '../lib/format.ts';
-import { IconMore } from './Icons.tsx';
+import { IconMore, IconPin } from './Icons.tsx';
 
 export function StatusLabel({ s, withTime, now }: { s: SessionSummary; withTime?: boolean; now?: number }) {
   const v = statusView(s);
@@ -50,6 +50,8 @@ export function sessionMenuItems(s: SessionSummary): MenuItem[] {
   ];
   if (!s.archived) {
     items.push(
+      s.pinned ? { label: 'ピン止めを外す', onClick: () => void setPinned(s.id, false) } : { label: 'ピン止め', onClick: () => void setPinned(s.id, true) },
+      s.unread ? { label: '既読にする', onClick: () => void setUnread(s.id, false) } : { label: '未読にする', onClick: () => void setUnread(s.id, true) },
       s.live
         ? { label: '停止', onClick: () => void run(() => api.stop(s.id)), danger: true }
         : { label: s.resumable ? '再開' : '起動', onClick: () => void run(() => api.resume(s.id)) },
@@ -185,6 +187,40 @@ export function useLongPress(onLongPress: (x: number, y: number) => void, ms = 4
       }
     },
   };
+}
+
+// ---- 一覧の件数の制限（「さらに表示」） ----
+
+/** 一覧に最初に出す件数と、「さらに表示」で増やす件数 */
+export const LIST_PAGE = 10;
+
+/**
+ * 長い一覧を LIST_PAGE 件ずつ出す。keep が true の行（ピン止め・あなたの番・実行中など）は、件数に関係なく出す。
+ * 何件まで出すかは画面を開いている間だけ覚える。
+ */
+export function useShowMore<T>(list: T[], keep: (x: T) => boolean = () => false) {
+  const [limit, setLimit] = useState(LIST_PAGE);
+  const shown = list.filter((x, i) => i < limit || keep(x));
+  return { shown, rest: list.length - shown.length, more: () => setLimit((n) => n + LIST_PAGE) };
+}
+
+export function ShowMoreButton({ rest, onClick, className = 'show-more' }: { rest: number; onClick: () => void; className?: string }) {
+  if (rest <= 0) return null;
+  return (
+    <button className={className} onClick={onClick}>
+      さらに表示（残り {rest} 件）
+    </button>
+  );
+}
+
+/** ピン止めの印（一覧の行） */
+export function PinMark({ s }: { s: Pick<SessionSummary, 'pinned'> }) {
+  if (!s.pinned) return null;
+  return (
+    <span className="pin-mark" title="ピン止め" aria-label="ピン止め">
+      <IconPin size={12} />
+    </span>
+  );
 }
 
 // ---- その他 ----

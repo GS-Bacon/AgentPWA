@@ -8,7 +8,7 @@ import { AGENT_COLOR, AGENT_LABEL, elapsed } from '../lib/format.ts';
 import { openSessionInNewPane, type LayoutState } from '../lib/layout.ts';
 import { archivedSessions, buildProjects, type Project } from '../lib/projects.ts';
 import { useNow } from '../components/Requests.tsx';
-import { AutoWarn, ConnState, ContextMenu, sessionMenuItems, StatusLabel, UsageBars, useLongPress } from '../components/common.tsx';
+import { AutoWarn, ConnState, ContextMenu, PinMark, sessionMenuItems, ShowMoreButton, StatusLabel, UsageBars, useLongPress, useShowMore } from '../components/common.tsx';
 import { AgentIcon, IconGear, IconPlus, ProjectSwatch } from '../components/Icons.tsx';
 
 export const DRAG_TYPE = 'application/x-agentpwa-session';
@@ -88,6 +88,7 @@ function SideRow({ s, paneNo, selected, now, onOpen, onMenu }: { s: SessionSumma
         <span className="srow-title ellipsis" style={s.rank === 5 ? { fontWeight: 500 } : undefined}>{s.title}</span>
         {sub}
       </span>
+      <PinMark s={s} />
       <AutoWarn s={s} />
       {paneNo && (
         <span className="pane-tag" title={`ペイン${paneNo}で表示中`}>
@@ -121,6 +122,8 @@ function ProjectGroup({
   const focusedSession = layout.panes.find((x) => x.id === layout.focused)?.sessionId;
   // 並べ替えでドラッグ中のプロジェクトが、この見出しの上半分（before）か下半分（after）にあるか
   const [dropAt, setDropAt] = useState<'before' | 'after' | null>(null);
+  // 多いときは LIST_PAGE 件ずつ出す。ピン止め・あなたの番・実行中と、ペインに出しているものは常に出す
+  const page = useShowMore(p.sessions, (s) => s.pinned || s.rank <= 4 || paneNo.has(s.id));
   const accepts = (e: React.DragEvent) => p.registered && e.dataTransfer.types.includes(PROJECT_DRAG_TYPE);
   return (
     <div>
@@ -184,9 +187,12 @@ function ProjectGroup({
         (p.sessions.length === 0 ? (
           <div className="muted" style={{ fontSize: 12, padding: '8px 28px', borderBottom: '1px solid #3d444d80' }}>セッションはありません</div>
         ) : (
-          p.sessions.map((s) => (
-            <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSessionInNewPane(l, s.id))} onMenu={onMenu} />
-          ))
+          <>
+            {page.shown.map((s) => (
+              <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSessionInNewPane(l, s.id))} onMenu={onMenu} />
+            ))}
+            <ShowMoreButton rest={page.rest} onClick={page.more} />
+          </>
         ))}
     </div>
   );
@@ -227,6 +233,7 @@ export function Sidebar({
   }
   const paneNo = new Map(layout.panes.map((x, i) => [x.sessionId, i + 1]));
   const focusedSession = layout.panes.find((x) => x.id === layout.focused)?.sessionId;
+  const archivedPage = useShowMore(archived, (s) => paneNo.has(s.id));
   const usageAgents = (['claude', 'codex'] as AgentKind[]).filter((a) => usage[a].length > 0);
   const collapsed = new Set(layout.collapsed);
   const total = waitingCount(sessions);
@@ -286,10 +293,14 @@ export function Sidebar({
               </span>
               アーカイブ済み（{archived.length}）
             </button>
-            {(archivedOpen || query) &&
-              archived.map((s) => (
-                <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSessionInNewPane(l, s.id))} onMenu={onMenu} />
-              ))}
+            {(archivedOpen || query) && (
+              <>
+                {archivedPage.shown.map((s) => (
+                  <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSessionInNewPane(l, s.id))} onMenu={onMenu} />
+                ))}
+                <ShowMoreButton rest={archivedPage.rest} onClick={archivedPage.more} />
+              </>
+            )}
           </div>
         )}
       </div>

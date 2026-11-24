@@ -22,6 +22,16 @@ export async function unarchiveSession(id: string): Promise<void> {
   await run(() => api.update(id, { archived: false }));
 }
 
+/** ピン止めする・外す（ピン止めしたセッションは一覧の先頭に出る。全端末で共有） */
+export async function setPinned(id: string, pinned: boolean): Promise<void> {
+  await run(() => api.update(id, { pinned }));
+}
+
+/** 未読にする・既読にする（未読の印は、そのセッションを開くと外れる） */
+export async function setUnread(id: string, unread: boolean): Promise<void> {
+  await run(() => api.update(id, { unread }));
+}
+
 /** 削除する。元に戻せないので確認を1回挟む */
 export async function deleteSession(id: string): Promise<void> {
   const s = getState().sessions[id];

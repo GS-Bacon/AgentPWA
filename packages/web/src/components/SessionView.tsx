@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AttachmentInfo } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
-import { loadEvents, run, useStore } from '../lib/store.ts';
+import { getState, loadEvents, run, useStore } from '../lib/store.ts';
 import { relPath } from '../lib/format.ts';
 import { unarchiveSession } from '../lib/sessionActions.ts';
 import { buildItems, type Item, type ToolItem } from '../lib/transcript.ts';
@@ -155,9 +155,12 @@ export function SessionView({ session, focused = true, compact = false }: { sess
     void loadEvents(session.id);
   }, [session.id]);
 
-  // フォーカス中で画面が見えているときに、未読を既読にする
+  // フォーカス中で画面が見えているときに、未読を既読にする。
+  // 「未読にする」の印（markedUnread）も、フォーカスを移して開き直したときや新しい内容が届いたときに外す。
+  // 印そのものは依存に入れない（このペインのメニューで「未読にする」を選んだ直後に、すぐ既読へ戻さないため）
   useEffect(() => {
-    if (!focused || session.readSeq >= session.lastSeq) return;
+    if (!focused) return;
+    if (session.readSeq >= session.lastSeq && !getState().sessions[session.id]?.markedUnread) return;
     const mark = () => {
       if (document.visibilityState === 'visible') void api.read(session.id, session.lastSeq).catch(() => {});
     };

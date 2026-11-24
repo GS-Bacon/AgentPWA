@@ -69,15 +69,17 @@ export function statusView(s: SessionSummary): StatusView {
     case 'waiting_input':
       return { label: '質問', cls: 'st-question' };
     case 'idle':
+      // 「未読にする」で印を付けただけのもの（新しい返答は無い）は、ただの「未読」にする
+      if (s.markedUnread) return { label: '未読', cls: 'st-unread' };
       return s.unread ? { label: '完了・未読', cls: 'st-unread' } : { label: 'アイドル', cls: 'st-idle' };
     case 'running':
       return { label: '実行中', cls: 'st-running' };
     case 'starting':
       return { label: '起動中', cls: 'st-running' };
     case 'error':
-      return { label: 'エラー', cls: 'st-error' };
+      return s.unread ? { label: 'エラー・未読', cls: 'st-unread' } : { label: 'エラー', cls: 'st-error' };
     case 'stopped':
-      return { label: '停止', cls: 'st-idle' };
+      return s.unread ? { label: '停止・未読', cls: 'st-unread' } : { label: '停止', cls: 'st-idle' };
   }
 }
 

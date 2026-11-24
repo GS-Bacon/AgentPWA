@@ -5,7 +5,7 @@ import { DEFAULT_PERMISSION_MODE, EFFORT_LEVELS, PERMISSION_MODES, type AgentDri
 import type { CreateSessionRequest, DeleteSessionResult, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { findAllowedFolder, isModeAllowed, type HubConfig } from './config.ts';
 import type { Store } from './db.ts';
-import { applyEvent, isEmptySession, markRead, newRecord, normalizeRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
+import { applyEvent, isEmptySession, markRead, markUnread, newRecord, normalizeRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
 
 export class HttpError extends Error {
   constructor(
@@ -339,7 +339,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   /**
-   * 名前の変更とアーカイブ・解除。
+   * 名前の変更、アーカイブ・解除、ピン止め、未読・既読の切り替え。
    * アーカイブするときは、動いているセッション（stopped 以外）を先に止める。解除しても stopped のままで、
    * 次に送信したときに resume_token で再開する。
    */
@@ -347,13 +347,16 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const first = this.mustGet(id);
     if (patch.archived === true && !first.archived) await this.halt(id);
     const rec = this.mustGet(id);
-    const next: SessionRecord = { ...rec };
+    let next: SessionRecord = { ...rec };
     if (typeof patch.title === 'string' && patch.title.trim()) {
       next.title = patch.title.trim().slice(0, 100);
       // 名前を付けたら、空のセッションとしては消さない
       next.started = true;
     }
     if (typeof patch.archived === 'boolean') next.archived = patch.archived;
+    if (typeof patch.pinned === 'boolean') next.pinned = patch.pinned;
+    if (patch.unread === true) next = markUnread(next);
+    else if (patch.unread === false) next = markRead(next);
     this.records.set(id, next);
     this.store.saveSession(next);
     const sum = this.summary(next);
