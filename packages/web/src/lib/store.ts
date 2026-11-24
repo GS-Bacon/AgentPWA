@@ -378,6 +378,19 @@ export function sortedSessions(sessions: Record<string, SessionSummary>, agent?:
     });
 }
 
+/**
+ * 確認待ちか: 許可・質問のカードが実際に出ている（未解決の依頼がある）セッション。
+ * 状態（waiting_*）だけでは判断しない。カードが出ていないのに待ちに見えるのを防ぐため。
+ */
+export function needsAnswer(s: SessionSummary | undefined): boolean {
+  return !!s && !s.archived && (s.pendingApprovals.length > 0 || s.pendingQuestions.length > 0);
+}
+
+/** 未読か（確認待ちも含む）: 一覧の「あなたの番」と同じ範囲 */
+export function isUnreadOrWaiting(s: SessionSummary): boolean {
+  return !s.archived && s.rank <= 3;
+}
+
 /** 「あなたの番」（許可待ち・質問・完了未読）の件数 */
 export function waitingCount(sessions: Record<string, SessionSummary>, agent?: AgentKind): number {
   return Object.values(sessions).filter((s) => !s.archived && s.rank <= 3 && (!agent || s.agent === agent)).length;

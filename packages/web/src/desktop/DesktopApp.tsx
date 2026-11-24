@@ -4,7 +4,8 @@
 // 画面に収まらないときは横スクロール（iPad は横スワイプ）で表示する。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.ts';
-import { discardIfEmpty, getState, onSessionCreatedByAgent, onSessionsClosed, run, sortedSessions, useStore } from '../lib/store.ts';
+import type { SessionSummary } from '@agentpwa/hub/api';
+import { discardIfEmpty, getState, isUnreadOrWaiting, needsAnswer, onSessionCreatedByAgent, onSessionsClosed, run, sortedSessions, useStore } from '../lib/store.ts';
 import { isRunning, projectHeadStyle } from '../lib/format.ts';
 import { useProjectColor } from '../lib/projects.ts';
 import type { ArchiveSectionProps } from '../App.tsx';
@@ -108,7 +109,7 @@ function PaneView({
     };
   }, [zone]);
   const focused = layout.focused === pane.id;
-  const waiting = s && s.rank <= 2;
+  const waiting = needsAnswer(s);
 
   // 見出しをドラッグしてペインを動かす
   const onHeadDragStart = (e: React.DragEvent) => {
@@ -368,7 +369,9 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
   const [maximized, setMaximized] = useState<string | null>(null);
   const isFinePointer = useMemo(() => window.matchMedia('(pointer: fine)').matches, []);
 
-  const waiting = sortedSessions(sessions).filter((s) => s.rank <= 3);
+  // 未読（確認待ちも含む）と、確認待ち（許可・質問のカードが出ている）
+  const unread = sortedSessions(sessions).filter(isUnreadOrWaiting);
+  const asking = sortedSessions(sessions).filter(needsAnswer);
 
   // アーカイブ・削除されたセッションのペインを閉じる（どの端末で操作しても届く）。並びの自動保存からも外れる
   useEffect(() => {
@@ -419,16 +422,22 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
     [],
   );
 
-  const nextWaiting = useCallback(() => {
-    update((l) => {
-      const list = sortedSessions(getState().sessions).filter((s) => s.rank <= 3);
-      if (list.length === 0) return l;
-      const cur = l.panes.find((p) => p.id === l.focused)?.sessionId;
-      const idx = list.findIndex((s) => s.id === cur);
-      const next = list[(idx + 1) % list.length];
-      return openSession(l, next.id, isWaiting);
-    });
-  }, [update]);
+  // 条件に合うセッションへ順に移動する
+  const goNext = useCallback(
+    (pick: (s: SessionSummary) => boolean) => {
+      update((l) => {
+        const list = sortedSessions(getState().sessions).filter(pick);
+        if (list.length === 0) return l;
+        const cur = l.panes.find((p) => p.id === l.focused)?.sessionId;
+        const idx = list.findIndex((s) => s.id === cur);
+        const next = list[(idx + 1) % list.length];
+        return openSession(l, next.id, isWaiting);
+      });
+    },
+    [update],
+  );
+  const nextUnread = useCallback(() => goNext(isUnreadOrWaiting), [goNext]);
+  const nextAsking = useCallback(() => goNext(needsAnswer), [goNext]);
 
   // フォーカスが移ったペインを画面内に入れる
   useEffect(() => {
@@ -436,7 +445,7 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
     el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   }, [layout.focused]);
 
-  // キーボード: Alt+J で次の待ちへ、Alt+1〜9 でペインへ、Enter でフォーカス中ペインの許可、Esc でフォーカス中ペインの中断
+  // キーボード: Alt+J で次の未読へ、Alt+K で確認待ちへ、Alt+1〜9 でペインへ、Enter でフォーカス中ペインの許可、Esc でフォーカス中ペインの中断
   useEffect(() => {
     // メニューやダイアログが開いているときの Esc は、それを閉じるだけにする。
     // 閉じる処理が先に走って DOM から消えることがあるので、押した時点（捕捉フェーズ）で調べておく
@@ -458,7 +467,12 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
       }
       if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyJ') {
         e.preventDefault();
-        nextWaiting();
+        nextUnread();
+        return;
+      }
+      if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyK') {
+        e.preventDefault();
+        nextAsking();
         return;
       }
       if (e.altKey && /^Digit[1-9]$/.test(e.code)) {
@@ -488,7 +502,7 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
       window.removeEventListener('keydown', onKeyCapture, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [layout, nextWaiting, update]);
+  }, [layout, nextUnread, nextAsking, update]);
 
   const renderPane = (p: Pane, i: number) => <PaneView key={p.id} pane={p} index={i} layout={layout} update={update} maximized={maximized === p.id} setMaximized={setMaximized} />;
 
@@ -507,10 +521,15 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
         <span className="muted ellipsis" style={{ fontSize: 12, marginLeft: 8 }}>{hint}</span>
         <span style={{ flex: '1 1 auto' }} />
         <ConnState />
-        <button className={`btn${waiting.length ? ' btn-attention' : ''}`} onClick={nextWaiting} disabled={waiting.length === 0} title="返答待ちのセッションへ順に移動（Alt+J）">
-          次の待ちへ
+        <button className="btn" onClick={nextUnread} disabled={unread.length === 0} title="未読のセッション（確認待ちを含む）へ順に移動（Alt+J）">
+          次の未読へ
           {isFinePointer && <kbd>Alt+J</kbd>}
-          {waiting.length > 0 && <span className="count">{waiting.length}</span>}
+          {unread.length > 0 && <span className="count">{unread.length}</span>}
+        </button>
+        <button className={`btn${asking.length ? ' btn-attention' : ''}`} onClick={nextAsking} disabled={asking.length === 0} title="許可・質問が出ているセッションへ順に移動（Alt+K）">
+          確認待ちへ
+          {isFinePointer && <kbd>Alt+K</kbd>}
+          {asking.length > 0 && <span className="count">{asking.length}</span>}
         </button>
         <button className="btn" onClick={() => update((l) => addPane(l))}>
           ＋ ペイン

@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import type { AgentKind } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
-import { getState, moveProject, useStore, waitingCount } from '../lib/store.ts';
+import { getState, moveProject, needsAnswer, useStore, waitingCount } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, elapsed } from '../lib/format.ts';
 import { openSessionInNewPane, type LayoutState } from '../lib/layout.ts';
 import { archivedSessions, buildProjects, type Project } from '../lib/projects.ts';
@@ -27,7 +27,8 @@ function dropProject(from: string, target: string, after: boolean): void {
   if (i < to) to--;
   void moveProject(from, to);
 }
-export const isWaiting = (id: string) => (getState().sessions[id]?.rank ?? 9) <= 2;
+/** 確認待ち（許可・質問のカードが出ている）か */
+export const isWaiting = (id: string) => needsAnswer(getState().sessions[id]);
 
 type Update = (fn: (s: LayoutState) => LayoutState) => void;
 /** 行の右クリック・長押しでメニューを開く */
@@ -336,7 +337,7 @@ export function Rail({ layout, update, onSettings }: { layout: LayoutState; upda
       <span style={{ width: 32, height: 1, background: 'var(--border)', margin: '4px 0' }} />
       {layout.panes.map((p, i) => {
         const s = p.sessionId ? sessions[p.sessionId] : undefined;
-        const waiting = s && s.rank <= 2;
+        const waiting = needsAnswer(s);
         const focused = layout.focused === p.id;
         return (
           <button
