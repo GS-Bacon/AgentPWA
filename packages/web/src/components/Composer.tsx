@@ -152,7 +152,10 @@ export function Composer({ session, compact, files }: { session: SessionSummary;
               className={i === sel ? 'slash-item sel' : 'slash-item'}
               // 押した瞬間に入力欄のフォーカスが外れないようにする
               onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setSel(i)}
+              // 止まったマウスの下に候補が開いたときに選ばれないよう、動かしたときだけ選ぶ
+              onMouseMove={() => {
+                if (sel !== i) setSel(i);
+              }}
               onClick={() => complete(c.name)}
             >
               <span className="slash-name">/{c.name}</span>
