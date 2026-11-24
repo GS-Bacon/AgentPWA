@@ -47,7 +47,16 @@ starting ──► running ──► idle ──(send)──► running
 - `full_auto` は、Hub が「フォルダの許可リストで `full_auto` を許可したフォルダ」のセッションにだけ渡す。それ以外のセッションへの `set_permission_mode`（`full_auto`）は Hub が拒否し、Driver には届かない。
 - `auto`（自動承認）はフォルダの制限なしで使える。危険と判定された操作はエージェント側で止まるため、`full_auto` とは扱いを分ける。
 
-### 3.2 セッションのアーカイブと削除
+### 3.2 モデルとエフォートの切り替え
+
+- `StartOptions.model` / `effort` は、どちらも省略でエージェントの既定。`model` はエイリアス（例: `opus`）か正式名で、Hub が使える文字（英数字と `. _ - : [ ]`、100 文字まで）を確かめてから渡す。
+- 起動したら、使っている設定を `model` イベントで送る（`model` / `effort` とも、既定なら省く）。
+- `set_model` を受けたら、指定された項目だけを変える（省略は変えない、`null` は既定に戻す）。エージェントに反映してから、両方の現在値を `model` で送る。反映できなかった項目があれば `error`（`fatal: false`）を送り、その項目は元の値のまま `model` を送る。
+- どの状態（`running` / `idle` / `waiting_*`）でも受け付ける。実行中のターンにすぐ効かないエージェントは、次のターンから反映し、そのことを `model` の送信時点で反映済みとみなしてよい（対応表に書く）。
+- エージェントに無いエフォート（例: `max`）は、`error`（`fatal: false`）で知らせて元の値のままにする。
+- 動いていないセッションへの `set_model` は Hub が覚えておき（`model` イベントを Hub が記録する）、次に起動・再開するときに `StartOptions` で渡す。
+
+### 3.3 セッションのアーカイブと削除
 
 - アーカイブと削除は Hub が扱う。Driver に `UserAction` は届かない。
 - Hub は、動いているセッション（`stopped` 以外）をアーカイブ・削除する前に `stop()` を呼ぶ。アーカイブを戻したセッションは `stopped` のままで、次に送信したときに `resumeToken` で再開する。
@@ -82,6 +91,8 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | 権限モード（起動時） | `--permission-mode`: `ask`→`default`、`auto_edit`→`acceptEdits`、`auto`→`auto`、`full_auto`→`bypassPermissions`、`plan`→`plan`。`full_auto` へ後から切り替えられるよう、常に `--allow-dangerously-skip-permissions` を付ける |
 | 権限モード（実行中） | プロセスが動いていれば、標準入力へ `{"type":"control_request","request_id":…,"request":{"subtype":"set_permission_mode","mode":…}}` を送る。`control_response` の success で反映とみなす（実行中のターンにもすぐ効く）。error なら `error`（`fatal: false`）を送り、元のモードのままにする。プロセスが止まっていれば、次の起動の `--permission-mode` に使う |
 | 自動承認（`auto`） | Claude Code の auto モード（安全判定の分類器が操作ごとに許可を決める）を使う。プランやモデルの条件で使えないときは、CLI が返すエラーを `error`（`fatal: false`）で知らせて元のモードのままにする。分類器が止めた操作が `can_use_tool` で届いたときは、通常どおり `approval_request` にする |
+| モデル・エフォート（起動時） | `--model <model>` と `--effort <level>`（`low` / `medium` / `high` / `xhigh` / `max`。プロトコルの値そのまま）。省略は付けない。起動したら（プロセスを起動する前に）`model` を送る |
+| モデル・エフォート（実行中） | プロセスが動いていれば、モデルは `{"type":"control_request","request_id":…,"request":{"subtype":"set_model","model":…}}`（既定に戻すときは `model` を省く）、エフォートは `{"subtype":"apply_flag_settings","settings":{"effortLevel":…}}`（既定に戻すときは `null`）を送る。`control_response` の success で反映とみなす（実行中のターンも次の API 呼び出しから効く）。知らないモデルは error（`Model '…' not found`）が返るので、`error`（`fatal: false`）を送り元のモデルのままにする。プロセスが止まっていれば、次の起動の `--model` / `--effort` に使う。`model` イベントの値は Driver が頼んだ値（エイリアスのまま）で、CLI が解決した正式名ではない |
 | モードの通知 | stream-json の `system/init` と `system/status` の `permissionMode` を、上の対応の逆で `permission_mode` にして送る（計画モードの終了など、CLI 自身による変更もここで届く） |
 | 履歴の削除（`deleteHistory`） | `~/.claude/projects/<cwd の英数字以外を - に置き換えた名前>/<session_id>.jsonl` と、同名のフォルダ（あれば）を消す。`claude --resume` の一覧からも消える |
 | 認証の確認 | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` / `CLAUDE_CODE_USE_FOUNDRY` があれば `api_key`。無ければ `claude auth status`（JSON）の `authMethod` を見て、`claude.ai` / `oauth_token` は `subscription`、`api_key` / `api_key_helper` / `third_party` は `api_key`。起動後も system/init の `apiKeySource` が `none` 以外なら、エラー（fatal）を出して止める |
@@ -94,6 +105,13 @@ Codex 担当で、次を対応表に追加してください（AGENTS.md と dri
 - `auto`（自動承認）は、承認をエージェント側の判定（AI による自動レビューなど）に任せる設定があれば対応付ける。なければ 3章5の決まりどおり `ask` に落とす
 - 実行中の切り替え方法（`turn/start` ごとに指定するなら「次のターンから反映」と明記）
 - `plan` に当たる設定がなければ、3章5の決まりどおり `ask` に落とす
+
+### Codex への依頼（モデルとエフォート）
+
+Codex 担当で、次を対応してください（プロトコル v4。3.2 を参照）。
+- `StartOptions.model` / `effort` を `thread/start`（または `turn/start`）のモデル・推論の深さ（reasoning effort）に対応付け、起動後に `model` イベントを送る
+- `set_model` を受けたら反映し、`model` イベントを送る。`turn/start` ごとに指定するなら「次のターンから反映」と対応表に書く
+- Codex に無いエフォート（例: `max`）は `error`（`fatal: false`）で知らせる。Web の選択肢は `packages/web/src/lib/models.ts` の `EFFORTS.codex`（いまは `low` / `medium` / `high` / `xhigh`）と `MODELS.codex`（いまは既定だけ）なので、選べるモデルとエフォートが決まったら知らせてください（Claude 側で直します）
 
 ### Codex への依頼（セッションの削除）
 
@@ -117,3 +135,4 @@ Codex 担当で、次を対応表に追加してください（AGENTS.md と dri
 | 2026-11-24 | 1 | `packages/shared/package.json` を追加（パッケージ名 `@agentpwa/shared`、`exports` は `./src/protocol.ts`）。型の変更はなし | Claude |
 | 2026-11-24 | 2 | 権限モード `full_auto` を追加。実行中の切り替え（`UserAction` の `set_permission_mode`）と、現在のモードの通知（`DriverEvent` の `permission_mode`）を追加 | Claude |
 | 2026-11-24 | 3 | 権限モード `auto`（自動承認）を追加。セッションのアーカイブと削除（3.2）と、`AgentDriver.deleteHistory`（任意）を追加 | Claude |
+| 2026-11-24 | 4 | エフォート（`EffortLevel` / `EFFORT_LEVELS`、`StartOptions.effort`）を追加。実行中のモデルとエフォートの切り替え（`UserAction` の `set_model`）と、現在の設定の通知（`DriverEvent` の `model`）を追加（3.2。アーカイブと削除は 3.3 に移動） | Claude |
