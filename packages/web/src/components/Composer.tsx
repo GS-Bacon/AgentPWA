@@ -10,6 +10,7 @@ import { formatBytes, MAX_ATTACHMENTS, MAX_TOTAL_BYTES, nameForPasted, releasePe
 import { IconClose, IconFile, IconPaperclip, IconSend, IconStop } from './Icons.tsx';
 import { PermissionButton, usePermissionSwitch } from './PermissionMode.tsx';
 import { ModelButton } from './ModelSettings.tsx';
+import { ContextMeter } from './ContextMeter.tsx';
 
 /** 添付ファイルの一覧（SessionView が持ち、ペインへのドロップでも足せるようにする） */
 export interface FilesState {
@@ -181,6 +182,7 @@ export function Composer({ session, compact, files }: { session: SessionSummary;
       {!compact && (
         <div className="composer-meta">
           <ModelButton session={session} disabled={archived} />
+          <ContextMeter session={session} />
         </div>
       )}
       <FileChips files={files.files} onRemove={files.remove} disabled={busy} />

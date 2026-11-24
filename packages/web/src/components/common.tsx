@@ -240,7 +240,7 @@ function usageTicks(u: UsageInfo): number {
 }
 
 /** 使用率に応じた色。0% の青（Primer の accent に近い色相）から、100% の赤へ色相を回す。 */
-function usageColor(percent: number): string {
+export function usageColor(percent: number): string {
   const t = Math.max(0, Math.min(1, percent / 100));
   const hue = 212 * (1 - t);
   return `hsl(${hue.toFixed(0)} 85% 60%)`;

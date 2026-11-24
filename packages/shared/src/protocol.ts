@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -267,6 +267,12 @@ export type DriverEvent =
        */
       windowMinutes?: number;
     }
+  /**
+   * v12: コンテキスト（会話の文脈）の使用量。本流の直近の API 呼び出しの入力（キャッシュ分を含む）と出力のトークンの合計を
+   * usedTokens に入れる。windowTokens はそのモデルのコンテキストの上限（分かったときだけ）。差分ではなく現在値を送る。
+   * Hub と Web はこのイベントの値を「現在の使用量」として扱い、UI は usedTokens / windowTokens の割合を出す。
+   */
+  | { type: 'context'; usedTokens: number; windowTokens?: number }
   | { type: 'error'; message: string; fatal: boolean };
 
 /** Hub が保存・配信するときの形。 */

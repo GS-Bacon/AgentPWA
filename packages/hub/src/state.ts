@@ -37,6 +37,8 @@ export interface SessionRecord {
   markedUnread?: boolean;
   /** このセッションを作った AI のセッション（AI が Hub の API で作ったときだけ） */
   parentSessionId?: string;
+  /** コンテキストの使用量（Driver が送った最新の context） */
+  context?: { usedTokens: number; windowTokens?: number };
   activity?: string;
   lastError?: string;
   pendingApprovals: ApprovalRequest[];
@@ -130,6 +132,10 @@ export function applyEvent(rec: SessionRecord, ev: SessionEvent): SessionRecord 
       r.effort = ev.effort;
       r.resolvedModel = ev.resolvedModel;
       r.resolvedEffort = ev.resolvedEffort;
+      break;
+    case 'context':
+      // 上限が届かなかったとき（プロセスを起動し直した直後など）は、前の上限を使う
+      r.context = { usedTokens: ev.usedTokens, windowTokens: ev.windowTokens ?? rec.context?.windowTokens };
       break;
     case 'tool':
       r.activity = oneLine(`${ev.name} ${ev.summary}`);
@@ -278,6 +284,7 @@ export function toSummary(rec: SessionRecord, extra: { machine: string; live: bo
     archived: rec.archived,
     empty: isEmptySession(rec),
     parentSessionId: rec.parentSessionId,
+    context: rec.context,
     activity: rec.activity,
     lastError: rec.lastError,
     pendingApprovals: rec.pendingApprovals,

@@ -52,6 +52,8 @@ export interface SessionSummary {
   empty: boolean;
   /** このセッションを作った AI のセッション（AI が Hub の API で作ったときだけ）。Web はこれを見て自動で開く */
   parentSessionId?: string;
+  /** コンテキストの使用量（Driver が送る context の値）。windowTokens は上限が分かったときだけ */
+  context?: { usedTokens: number; windowTokens?: number };
   /** 一覧に出す直近の動き（例: 'Edit src/api.ts'） */
   activity?: string;
   lastError?: string;

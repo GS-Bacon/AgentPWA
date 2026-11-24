@@ -84,6 +84,12 @@ export class StreamMapper {
   private subagents = new Map<string, SubagentEv>();
   /** CLI の task_id → サブエージェントを起動したツールの toolId（task_updated には toolId が無いため） */
   private taskTools = new Map<string, string>();
+  /** コンテキストの使用量（本流の直近の API 呼び出しのモデルとトークン数、最後に送った値） */
+  private ctxModel = '';
+  private ctxUsed = 0;
+  /** モデル → コンテキストの上限（result の modelUsage[].contextWindow で分かる） */
+  private ctxWindows = new Map<string, number>();
+  private ctxSent = '';
 
   map(msg: Json): MapResult {
     switch (msg?.type) {
@@ -110,7 +116,7 @@ export class StreamMapper {
         const isError = Boolean(msg.is_error) || (msg.subtype && msg.subtype !== 'success');
         const errors: string[] = Array.isArray(msg.errors) ? msg.errors.map(String) : [];
         if (isError && errors.length === 0 && typeof msg.result === 'string') errors.push(msg.result);
-        return { events: [], turnEnded: { isError: Boolean(isError), errors } };
+        return { events: this.mapResultContext(msg), turnEnded: { isError: Boolean(isError), errors } };
       }
       case 'rate_limit_event':
         return { events: this.mapRateLimit(msg.rate_limit_info) };
@@ -178,7 +184,46 @@ export class StreamMapper {
         }
       }
     }
+    const ctx = this.assistantContext(m);
+    if (ctx) events.push(ctx);
     return { events, activity: true };
+  }
+
+  /**
+   * 本流の assistant メッセージの usage から、コンテキストの使用量を求める。
+   * 入力（キャッシュの読み書きを含む）と出力の合計が、次の呼び出しで文脈に入る量に近い。
+   * /context などの出力（モデル <synthetic>）は usage が空なので数えない。
+   */
+  private assistantContext(m: Json): DriverEvent | undefined {
+    const u = m.usage;
+    if (!u || m.model === '<synthetic>') return undefined;
+    const n = (v: unknown) => (typeof v === 'number' && v > 0 ? v : 0);
+    const used = n(u.input_tokens) + n(u.cache_read_input_tokens) + n(u.cache_creation_input_tokens) + n(u.output_tokens);
+    if (used === 0) return undefined;
+    if (typeof m.model === 'string' && m.model) this.ctxModel = m.model;
+    this.ctxUsed = used;
+    return this.contextEvent();
+  }
+
+  /** result の modelUsage から、モデルごとのコンテキストの上限を覚える */
+  private mapResultContext(msg: Json): DriverEvent[] {
+    const mu = msg.modelUsage;
+    if (!mu || typeof mu !== 'object') return [];
+    for (const [model, v] of Object.entries<Json>(mu)) {
+      if (typeof v?.contextWindow === 'number' && v.contextWindow > 0) this.ctxWindows.set(model, v.contextWindow);
+    }
+    const ev = this.contextEvent();
+    return ev ? [ev] : [];
+  }
+
+  /** 前に送った値と変わったときだけ context を作る */
+  private contextEvent(): DriverEvent | undefined {
+    if (this.ctxUsed === 0) return undefined;
+    const windowTokens = this.ctxWindows.get(this.ctxModel);
+    const key = `${this.ctxUsed}/${windowTokens ?? ''}`;
+    if (key === this.ctxSent) return undefined;
+    this.ctxSent = key;
+    return windowTokens ? { type: 'context', usedTokens: this.ctxUsed, windowTokens } : { type: 'context', usedTokens: this.ctxUsed };
   }
 
   /** サブエージェント内の assistant メッセージ（完成版だけ。途中経過の stream_event は CLI が送らない） */

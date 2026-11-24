@@ -148,6 +148,7 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | 履歴の削除（`deleteHistory`） | `~/.claude/projects/<cwd の英数字以外を - に置き換えた名前>/<session_id>.jsonl` と、同名のフォルダ（あれば）を消す。`claude --resume` の一覧からも消える |
 | 認証の確認 | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` / `CLAUDE_CODE_USE_FOUNDRY` があれば `api_key`。無ければ `claude auth status`（JSON）の `authMethod` を見て、`claude.ai` / `oauth_token` は `subscription`、`api_key` / `api_key_helper` / `third_party` は `api_key`。起動後も system/init の `apiKeySource` が `none` 以外なら、エラー（fatal）を出して止める |
 | 使用量 | `rate_limit_event` の `unifiedWindows.five_hour` / `seven_day` / `seven_day_overage_included` の utilization を `usage`（「セッション枠（5時間）」「週間」「Fable（週間）」）にする。`seven_day_overage_included` は CLI が「Fable limit」と呼ぶ週間枠で、その枠がある契約のときだけ届く。`windowMinutes` はそれぞれ 300 / 10080 / 10080 |
+| コンテキストの使用量（v12） | `parent_tool_use_id` の無い assistant メッセージの `message.usage` の `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` + `output_tokens` を `context` の `usedTokens` にする（モデル `<synthetic>` は除く）。上限は result の `modelUsage[<モデル>].contextWindow`（Opus 5.5 は 1000000）を覚えて `windowTokens` に入れる。値が変わったときだけ送る。プロセスを起動し直した直後は上限が最初の result まで分からないので、Hub は前の上限を使い続ける |
 | サブエージェント | `Agent`（古い版は `Task`）ツールの `tool_use` で `subagent`（running。`subagent_type` / `description` / `prompt`）を送る。`system/task_started` / `task_progress`（`description` を `progress` に）/ `task_updated`（`patch.status`）/ `task_notification`（`status` と `summary` を `result` に）を、`tool_use_id`（無いものは `task_id` から引く）で対応付けて送る。`task_type` が `local_agent` 以外（裏で動くシェルなど）は扱わない。既定では裏で動くので、`Agent` の `tool_result`（`tool_use_result.isAsync`）では終わりにしない。前面で動いたものは `tool_result` で `done` / `failed` にする。`parent_tool_use_id` の付いた assistant / user メッセージを、`parentToolId` 付きの `message` / `tool` にする（途中経過の stream_event は CLI が送らないので、`message_delta` は出さない）。CLI のプロセスが終わったら、動いたままのものを `stopped` にする |
 
 ### Codex への依頼（権限モード）
@@ -202,6 +203,10 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 
 - Codex 側に、作業を子のエージェントに任せる仕組みがあれば、3.6 のとおり `subagent` イベントと `parentToolId` を送り、対応表に書いてください。無ければ対応は不要です（今までどおり本流だけが出ます）。
 
+### Codex への依頼（コンテキストの使用量、v12）
+
+- （任意）`context` イベント（`usedTokens`: 直近の呼び出しで文脈に入っているトークン数、`windowTokens`: モデルのコンテキストの上限）を送ってください。app-server のトークン使用量の通知（`thread/tokenUsage/updated` の `last` と `modelContextWindow` など）がそのまま使えるはずです。送れば、ペインのモデルとエフォートのボタンの横に使用率が出ます。
+
 ### Codex（`codex app-server`）— Codex 担当
 
 | プロトコル | Codex app-server 側 |
@@ -228,3 +233,4 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 | 2026-11-24 | 9 | `usage` に `windowMinutes`（枠の長さ（分）。省略可）を追加。UI がバーのメモリ（5時間枠は5等分、週間枠は7等分）に使う。Codex 側の対応は任意 | Claude |
 | 2026-11-24 | 10 | サブエージェントの `subagent` イベントと、`message` / `message_delta` / `tool` の `parentToolId`（サブエージェントの中のイベント）を追加（3.6）。どちらも足しただけで、Codex 側の対応は任意 | Claude |
 | 2026-11-24 | 11 | 巻き戻しとフォーク（3.7）。`message` に `rewindable`、`DriverEvent` に `rewound`、`UserAction` に `rewind`（`RewindRestore`）、`AgentDriver` に `supportsRewind` / `forkToken` を追加。どれも省略可で、Codex 側の対応は任意 | Claude |
+| 2026-11-24 | 12 | `DriverEvent` に `context`（コンテキストの使用量。`usedTokens` と、上限の `windowTokens`（省略可））を追加。UI はペインのモデルとエフォートのボタンの横に使用率を出す。足しただけで、Codex 側の対応は任意 | Claude |
