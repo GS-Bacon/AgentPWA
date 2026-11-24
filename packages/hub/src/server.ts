@@ -8,7 +8,7 @@ import { EFFORT_LEVELS, PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type
 import type { CreateProjectRequest, ReorderProjectsRequest, CreateSessionRequest, FileInfo, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { checkOrigin, checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
-import { fileHeaders, resolveProjectFile, toInfo } from './files.ts';
+import { extraViewerRoots, fileHeaders, resolveProjectFile, toInfo } from './files.ts';
 import { createProject, listDirs, reorderProjects, updateProject, type ProjectDeps } from './projects.ts';
 import { HttpError, type SessionManager } from './sessions.ts';
 
@@ -233,16 +233,16 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   // 入力欄のスラッシュコマンドの補完
   app.get<{ Params: { id: string } }>('/api/sessions/:id/commands', async (req): Promise<SlashCommand[]> => manager.commands(req.params.id));
 
-  // ファイルビュワー（docs/architecture.md の 5.1、6.7）。プロジェクトのフォルダの下のファイルだけ
+  // ファイルビュワー（docs/architecture.md の 5.1、6.7）。プロジェクトのフォルダと、Google ドライブなど追加のフォルダの下のファイルだけ
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>('/api/sessions/:id/file-info', async (req): Promise<FileInfo> => {
     const s = manager.get(req.params.id);
-    return toInfo(await resolveProjectFile(s.cwd, req.query.path ?? ''));
+    return toInfo(await resolveProjectFile(s.cwd, req.query.path ?? '', extraViewerRoots(config)));
   });
 
   // HTML の中の相対パス（img/a.png など）がそのまま解決できるように、クエリではなくパスで指定する
   app.get<{ Params: { id: string; '*': string } }>('/files/:id/*', async (req, reply) => {
     const s = manager.get(req.params.id);
-    const f = await resolveProjectFile(s.cwd, req.params['*'] ?? '');
+    const f = await resolveProjectFile(s.cwd, req.params['*'] ?? '', extraViewerRoots(config));
     reply.headers(fileHeaders(f));
     reply.header('accept-ranges', 'bytes');
     // iPhone / iPad の Safari は、動画を Range で読めないと再生しない

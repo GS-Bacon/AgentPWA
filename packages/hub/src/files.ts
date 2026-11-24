@@ -1,9 +1,12 @@
 // ファイルビュワー用のファイル配信（docs/architecture.md の 5.1 と 6.7）。
-// セッションのプロジェクトのフォルダの下にあるファイルだけを返す。フォルダの一覧は返さない。
+// セッションのプロジェクトのフォルダの下と、追加で見てよいフォルダ（Google ドライブ、設定の viewerRoots）の下の
+// ファイルだけを返す。フォルダの一覧は返さない。
 // いまは Hub と同じPC（local）のプロジェクトだけ。SSH 先のマシンは起動役を通して読む（フェーズ3）。
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { FileInfo, FileKind } from './api.ts';
+import type { HubConfig } from './config.ts';
 import { isInside } from './projects.ts';
 import { HttpError } from './sessions.ts';
 
@@ -56,10 +59,40 @@ async function looksText(file: string): Promise<boolean> {
   }
 }
 
+const MY_DRIVE = ['マイドライブ', 'My Drive'];
+let gdriveCache: { at: number; roots: string[] } | undefined;
+
+/**
+ * パソコン版 Google ドライブのフォルダを探す（Windows のみ）。
+ * ストリーミングでは、直下に「マイドライブ」（My Drive）があるドライブを、ドライブごと（共有ドライブも含む）加える。
+ * ミラーリングでは、ホームの下の「マイドライブ」（My Drive）を加える。
+ * Google ドライブは Hub より後に起動することがあるので、1分ごとに探し直す。
+ */
+export function googleDriveRoots(): string[] {
+  if (process.platform !== 'win32') return [];
+  if (gdriveCache && Date.now() - gdriveCache.at < 60_000) return gdriveCache.roots;
+  const roots: string[] = [];
+  for (let c = 'D'.charCodeAt(0); c <= 'Z'.charCodeAt(0); c++) {
+    const root = `${String.fromCharCode(c)}:\\`;
+    if (MY_DRIVE.some((n) => fs.existsSync(path.join(root, n)))) roots.push(root);
+  }
+  for (const n of MY_DRIVE) {
+    const mirror = path.join(os.homedir(), n);
+    if (fs.existsSync(mirror)) roots.push(mirror);
+  }
+  gdriveCache = { at: Date.now(), roots };
+  return roots;
+}
+
+/** プロジェクトのフォルダのほかに、ビュワーで開いてよいフォルダ（設定の viewerRoots と Google ドライブ） */
+export function extraViewerRoots(config: Pick<HubConfig, 'viewerRoots'>): string[] {
+  return [...(config.viewerRoots ?? []), ...googleDriveRoots()];
+}
+
 export interface ResolvedFile {
   /** 実パス */
   real: string;
-  /** プロジェクトのフォルダからの相対パス（区切りは /） */
+  /** プロジェクトのフォルダからの相対パス（区切りは /）。プロジェクトの外（追加のフォルダの下）なら絶対パス（区切りは /） */
   rel: string;
   size: number;
   mtime: string;
@@ -68,10 +101,10 @@ export interface ResolvedFile {
 }
 
 /**
- * プロジェクトのフォルダ（cwd）の下のファイルを探す。p は cwd からの相対パスか絶対パス。
- * シンボリックリンクを解決したうえでフォルダの外に出ていないかを確かめる。
+ * プロジェクトのフォルダ（cwd）か extraRoots の下のファイルを探す。p は cwd からの相対パスか絶対パス。
+ * シンボリックリンクを解決したうえで、どのフォルダの外にも出ていないかを確かめる。
  */
-export async function resolveProjectFile(cwd: string, p: string): Promise<ResolvedFile> {
+export async function resolveProjectFile(cwd: string, p: string, extraRoots: string[] = []): Promise<ResolvedFile> {
   if (typeof p !== 'string' || !p || p.includes('\0')) throw new HttpError(400, 'ファイルのパスを指定してください');
   let realRoot: string;
   try {
@@ -79,21 +112,31 @@ export async function resolveProjectFile(cwd: string, p: string): Promise<Resolv
   } catch {
     throw new HttpError(404, `プロジェクトのフォルダが見つかりません: ${cwd}`);
   }
+  const extras: { given: string; real: string }[] = [];
+  for (const r of extraRoots) {
+    try {
+      extras.push({ given: path.resolve(r), real: await fs.promises.realpath(r) });
+    } catch {
+      // 見つからないフォルダ（外したドライブなど）は使わない
+    }
+  }
   // 先に字面で確かめる（..、別のドライブ、UNC パスなど）
   const target = path.resolve(cwd, p);
-  if (!isInside(path.resolve(cwd), target) && !isInside(realRoot, target)) {
-    throw new HttpError(403, `プロジェクトのフォルダの外のファイルは開けません: ${p}`);
-  }
+  const allowed =
+    isInside(path.resolve(cwd), target) || isInside(realRoot, target) || extras.some((r) => isInside(r.given, target) || isInside(r.real, target));
+  if (!allowed) throw new HttpError(403, `プロジェクトのフォルダの外のファイルは開けません: ${p}`);
   let real: string;
   try {
     real = await fs.promises.realpath(target);
   } catch {
     throw new HttpError(404, `ファイルが見つかりません: ${p}`);
   }
-  if (!isInside(realRoot, real)) throw new HttpError(403, `プロジェクトのフォルダの外のファイルは開けません: ${p}`);
+  const inProject = isInside(realRoot, real);
+  if (!inProject && !extras.some((r) => isInside(r.real, real))) throw new HttpError(403, `プロジェクトのフォルダの外のファイルは開けません: ${p}`);
   const st = await fs.promises.stat(real);
   if (!st.isFile()) throw new HttpError(400, `ファイルではありません: ${p}`);
-  const rel = path.relative(realRoot, real).split(path.sep).join('/');
+  // プロジェクトの外のファイルは、絶対パスのまま返す（Web はこれを /files/ の URL に使う）
+  const rel = (inProject ? path.relative(realRoot, real) : real).split(path.sep).join('/');
   const ext = path.extname(real).toLowerCase();
   let t = TYPES[ext];
   if (!t) t = (await looksText(real)) ? { mime: 'text/plain; charset=utf-8', kind: 'text' } : { mime: 'application/octet-stream', kind: 'binary' };

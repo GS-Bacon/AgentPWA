@@ -40,7 +40,12 @@ beforeEach(async () => {
   fs.writeFileSync(path.join(proj, 'noext'), 'plain text');
   fs.writeFileSync(path.join(proj, 'blob.bin'), Buffer.from([1, 0, 2]));
   fs.writeFileSync(path.join(dir, 'secret.txt'), 'secret');
+  const drive = path.join(dir, 'drive');
+  fs.mkdirSync(path.join(drive, 'マイドライブ', 'cup', 'img'), { recursive: true });
+  fs.writeFileSync(path.join(drive, 'マイドライブ', 'cup', 'concept.html'), '<html><img src="img/a.png"></html>');
+  fs.writeFileSync(path.join(drive, 'マイドライブ', 'cup', 'img', 'a.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   const config: HubConfig = {
+    viewerRoots: [drive],
     port: 0,
     machineName: 'laptop',
     allowedUsers: ['me@example.com'],
@@ -85,6 +90,20 @@ describe('ファイルの配信', () => {
     expect((await get(`/api/sessions/${sid}/file-info?path=nothing.txt`)).statusCode).toBe(404);
     expect((await get(`/api/sessions/${sid}/file-info?path=slides`)).statusCode).toBe(400);
     expect((await get(`/api/sessions/no-such-session/file-info?path=README.md`)).statusCode).toBe(404);
+  });
+
+  it('viewerRoots（Google ドライブなど）の下なら、プロジェクトの外でも絶対パスで開ける', async () => {
+    const abs = path.join(dir, 'drive', 'マイドライブ', 'cup', 'concept.html');
+    const info = (await get(`/api/sessions/${sid}/file-info?path=${encodeURIComponent(abs)}`)).json();
+    expect(info.path).toBe(fs.realpathSync(abs).split(path.sep).join('/'));
+    expect(info.kind).toBe('html');
+    // Web と同じ組み立て方の URL で、HTML から相対パスの画像も読める
+    const url = (rel: string) => `/files/${sid}/${rel.split('/').map(encodeURIComponent).join('/')}`;
+    expect((await get(url(info.path))).body).toContain('img/a.png');
+    expect((await get(url(info.path.replace(/concept\.html$/, 'img/a.png')))).statusCode).toBe(200);
+    // viewerRoots の外は今までどおり開けない
+    expect((await get(`/api/sessions/${sid}/file-info?path=${encodeURIComponent(path.join(dir, 'secret.txt'))}`)).statusCode).toBe(403);
+    expect((await get(url(info.path.replace(/drive\/マイドライブ\/cup\/concept\.html$/, 'secret.txt')))).statusCode).toBe(403);
   });
 
   it('シンボリックリンクでプロジェクトの外を指すファイルは開けない', async (ctx) => {

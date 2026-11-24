@@ -22,6 +22,8 @@ export interface HubConfig {
   folders: FolderEntry[];
   /** 画面からプロジェクトを作ってよいルートフォルダ（絶対パス）。空なら画面からは作れない */
   projectRoots: string[];
+  /** プロジェクトのフォルダのほかに、ファイルビュワーで開いてよいフォルダ（絶対パス）。パソコン版 Google ドライブは自動で加わる */
+  viewerRoots?: string[];
   /** claude CLI のパス（省略時は PATH と ~/.local/bin を探す） */
   claudePath?: string;
   /** Codex タブの Driver。'fake' はフィクスチャを流すだけの表示確認用 */
@@ -64,6 +66,9 @@ function validate(c: HubConfig, file: string): HubConfig {
   if (!Array.isArray(c.projectRoots)) errors.push('projectRoots は配列にしてください');
   for (const r of c.projectRoots ?? []) {
     if (typeof r !== 'string' || !path.isAbsolute(r)) errors.push(`projectRoots は絶対パスにしてください: ${JSON.stringify(r)}`);
+  }
+  if (c.viewerRoots !== undefined && (!Array.isArray(c.viewerRoots) || c.viewerRoots.some((r) => typeof r !== 'string' || !path.isAbsolute(r)))) {
+    errors.push('viewerRoots は絶対パスの配列にしてください');
   }
   if (c.codex !== 'fake' && c.codex !== 'driver') errors.push("codex は 'fake' か 'driver' にしてください");
   if (errors.length) throw new Error(`設定ファイル ${file} の誤り:\n- ${errors.join('\n- ')}`);
