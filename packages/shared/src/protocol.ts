@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -29,11 +29,18 @@ export type SessionStatus =
 /** 一覧で「あなたの番」に入る状態（優先表示の対象）。idle は未読のときだけ Hub が加える。 */
 export const USER_TURN_STATUSES: readonly SessionStatus[] = ['waiting_approval', 'waiting_input'];
 
-/** 権限モード。各 Driver がエージェント固有の設定に対応付ける。 */
+/**
+ * 権限モード。各 Driver がエージェント固有の設定に対応付ける。
+ * 起動時に StartOptions.permissionMode で決め、実行中も UserAction の set_permission_mode で変えられる。
+ */
 export type PermissionMode =
   | 'ask' // 毎回確認（既定）
   | 'auto_edit' // ファイル編集は自動、コマンドは確認
+  | 'full_auto' // すべて自動で許可（確認しない）。Hub がフォルダごとに許可した場合だけ使える
   | 'plan'; // 計画のみ（変更しない）
+
+/** UI での表示順（切り替えメニューの並び）。 */
+export const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto_edit', 'full_auto', 'plan'];
 
 export interface StartOptions {
   /** Hub が採番する ID。Driver はこれをそのまま使う。 */
@@ -110,6 +117,12 @@ export type DriverEvent =
   | { type: 'question_resolved'; requestId: string }
   /** 再開に必要なエージェント固有 ID（Claude の session_id、Codex の thread.id など）。分かった時点ですぐ送る。 */
   | { type: 'resume_token'; token: string }
+  /**
+   * 現在の権限モード。起動直後と、モードが変わったとき（set_permission_mode の反映、
+   * エージェント自身による変更（例: 計画モードの終了））に送る。
+   * Hub と Web はこのイベントの値を「現在のモード」として扱う。
+   */
+  | { type: 'permission_mode'; mode: PermissionMode }
   | { type: 'usage'; label: string; percent?: number; resetsAt?: string }
   | { type: 'error'; message: string; fatal: boolean };
 
@@ -127,7 +140,9 @@ export type UserAction =
   | { type: 'send'; text: string }
   | { type: 'approve'; requestId: string; decision: ApprovalDecision; note?: string }
   | { type: 'answer'; requestId: string; text: string }
-  | { type: 'interrupt' };
+  | { type: 'interrupt' }
+  /** 実行中に権限モードを変える。反映できたら Driver が permission_mode イベントを送る。 */
+  | { type: 'set_permission_mode'; mode: PermissionMode };
 
 /** 各 Driver パッケージが実装するインターフェース。 */
 export interface AgentDriver {
