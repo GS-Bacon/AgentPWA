@@ -1,0 +1,31 @@
+{"type":"status","status":"starting"}
+{"type":"resume_token","token":"question-token-1"}
+{"type":"permission_mode","mode":"plan"}
+{"type":"model","model":"gpt-6.2-sol","effort":"low","resolvedModel":"gpt-6.2-sol","resolvedEffort":"low"}
+{"type":"status","status":"idle"}
+{"type":"usage","label":"codex 短期枠","percent":9,"windowMinutes":10080,"resetsAt":"2026-11-30T09:44:49.000Z"}
+{"type":"status","status":"running"}
+{"type":"message","messageId":"question-messageId-2","role":"user","text":"質問フローの検証です。request_user_input を一度だけ呼び、「色を選んでください」という質問を「青」「赤」の選択肢で出してください。回答を受け取ったら「確認しました」とだけ返してください。ファイル操作と追加調査は不要です。"}
+{"type":"status","status":"running"}
+{"type":"message_delta","messageId":"question-messageId-3","text":"色"}
+{"type":"message_delta","messageId":"question-messageId-3","text":"の"}
+{"type":"message_delta","messageId":"question-messageId-3","text":"選"}
+{"type":"message_delta","messageId":"question-messageId-3","text":"択"}
+{"type":"message_delta","messageId":"question-messageId-3","text":"肢"}
+{"type":"message_delta","messageId":"question-messageId-3","text":"を"}
+{"type":"message_delta","messageId":"question-messageId-3","text":"表示"}
+{"type":"message_delta","messageId":"question-messageId-3","text":"します"}
+{"type":"message_delta","messageId":"question-messageId-3","text":"。"}
+{"type":"message","messageId":"question-messageId-3","role":"assistant","text":"色の選択肢を表示します。"}
+{"type":"question","requestId":"rpc:number:0","prompt":"色を選んでください","questions":[{"question":"色を選んでください","header":"色","options":[{"label":"青","description":"青を選択します。"},{"label":"赤","description":"赤を選択します。"}]}],"options":["青","赤"]}
+{"type":"status","status":"waiting_input"}
+{"type":"usage","label":"codex 短期枠","percent":9,"windowMinutes":10080,"resetsAt":"2026-11-30T09:44:49.000Z"}
+{"type":"question_resolved","requestId":"rpc:number:0"}
+{"type":"status","status":"running"}
+{"type":"usage","label":"codex 短期枠","percent":9,"windowMinutes":10080,"resetsAt":"2026-11-30T09:44:49.000Z"}
+{"type":"message_delta","messageId":"question-messageId-4","text":"確認"}
+{"type":"message_delta","messageId":"question-messageId-4","text":"しました"}
+{"type":"message","messageId":"question-messageId-4","role":"assistant","text":"確認しました"}
+{"type":"usage","label":"codex 短期枠","percent":9,"windowMinutes":10080,"resetsAt":"2026-11-30T09:44:49.000Z"}
+{"type":"status","status":"idle"}
+{"type":"status","status":"stopped"}

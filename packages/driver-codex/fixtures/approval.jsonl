@@ -1,0 +1,39 @@
+{"type":"status","status":"starting"}
+{"type":"resume_token","token":"approval-token-1"}
+{"type":"permission_mode","mode":"ask"}
+{"type":"model","model":"gpt-6.2-sol","effort":"low","resolvedModel":"gpt-6.2-sol","resolvedEffort":"low"}
+{"type":"status","status":"idle"}
+{"type":"usage","label":"codex 短期枠","percent":9,"windowMinutes":10080,"resetsAt":"2026-11-30T09:44:49.000Z"}
+{"type":"status","status":"running"}
+{"type":"message","messageId":"approval-messageId-2","role":"user","text":"承認フローの検証です。この作業フォルダに sample.txt を apply_patch で新規作成し、内容は「テスト」の一行だけにしてください。追加調査や別の変更はせず、完了後「完了」とだけ返してください。"}
+{"type":"status","status":"running"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"`"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"apply"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"_patch"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"`"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":" "}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"で"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":" `"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"sample"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":".txt"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"`"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":" を"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"作"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"成"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"します"}
+{"type":"message_delta","messageId":"approval-messageId-3","text":"。"}
+{"type":"message","messageId":"approval-messageId-3","role":"assistant","text":"`apply_patch` で `sample.txt` を作成します。"}
+{"type":"tool","toolId":"approval-toolId-4","state":"running","name":"apply_patch","summary":"sample.txt +1 −0","paths":["sample.txt"]}
+{"type":"approval_request","requestId":"rpc:number:0","kind":"file_change","title":"ファイルを変更してよいですか？","changes":[{"path":"sample.txt","kind":"add","additions":1,"deletions":0,"diff":"--- /dev/null\n+++ b/sample.txt\n@@ -0,0 +1,1 @@\n+テスト\n"}],"choices":["allow","allow_session","deny"]}
+{"type":"status","status":"waiting_approval"}
+{"type":"usage","label":"codex 短期枠","percent":9,"windowMinutes":10080,"resetsAt":"2026-11-30T09:44:49.000Z"}
+{"type":"approval_resolved","requestId":"rpc:number:0","decision":"allow"}
+{"type":"status","status":"running"}
+{"type":"tool","toolId":"approval-toolId-4","state":"done","name":"apply_patch","summary":"sample.txt +1 −0","paths":["sample.txt"],"output":"--- /dev/null\n+++ b/sample.txt\n@@ -0,0 +1,1 @@\n+テスト\n"}
+{"type":"usage","label":"codex 短期枠","percent":9,"windowMinutes":10080,"resetsAt":"2026-11-30T09:44:49.000Z"}
+{"type":"message_delta","messageId":"approval-messageId-5","text":"完"}
+{"type":"message_delta","messageId":"approval-messageId-5","text":"了"}
+{"type":"message","messageId":"approval-messageId-5","role":"assistant","text":"完了"}
+{"type":"usage","label":"codex 短期枠","percent":9,"windowMinutes":10080,"resetsAt":"2026-11-30T09:44:50.000Z"}
+{"type":"status","status":"idle"}
+{"type":"status","status":"stopped"}

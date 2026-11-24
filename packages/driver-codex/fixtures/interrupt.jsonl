@@ -1,0 +1,11 @@
+{"type":"status","status":"starting"}
+{"type":"resume_token","token":"interrupt-token-1"}
+{"type":"permission_mode","mode":"ask"}
+{"type":"model","model":"gpt-6.2-sol","effort":"low","resolvedModel":"gpt-6.2-sol","resolvedEffort":"low"}
+{"type":"status","status":"idle"}
+{"type":"usage","label":"codex 短期枠","percent":9,"windowMinutes":10080,"resetsAt":"2026-11-30T09:44:49.000Z"}
+{"type":"status","status":"running"}
+{"type":"message","messageId":"interrupt-messageId-2","role":"user","text":"中断フローの検証です。1から100までの数字を順に数える短い説明を考えてください。ファイル操作は不要です。"}
+{"type":"status","status":"running"}
+{"type":"status","status":"idle","reason":"中断しました"}
+{"type":"status","status":"stopped"}
