@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -43,12 +43,24 @@ export type PermissionMode =
 /** UI での表示順（切り替えメニューの並び）。 */
 export const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'auto_edit', 'auto', 'full_auto', 'plan'];
 
+/**
+ * エフォート（考える深さ）。各 Driver がエージェント固有の設定に対応付ける。
+ * 起動時に StartOptions.effort で決め、実行中も UserAction の set_model で変えられる。省略はエージェントの既定。
+ */
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** UI での表示順（低い順）。 */
+export const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
 export interface StartOptions {
   /** Hub が採番する ID。Driver はこれをそのまま使う。 */
   sessionId: string;
   /** 作業フォルダ（Hub 側で許可リストに入っていることを確認済み）。 */
   cwd: string;
+  /** モデル（エイリアスか正式名）。省略はエージェントの既定 */
   model?: string;
+  /** 省略はエージェントの既定 */
+  effort?: EffortLevel;
   permissionMode: PermissionMode;
   initialPrompt?: string;
   /** 再開用。Driver が以前 `resume_token` イベントで返した値。 */
@@ -124,6 +136,11 @@ export type DriverEvent =
    * Hub と Web はこのイベントの値を「現在のモード」として扱う。
    */
   | { type: 'permission_mode'; mode: PermissionMode }
+  /**
+   * 現在のモデルとエフォート（どちらも省略はエージェントの既定）。起動直後と、set_model を反映したときに送る。
+   * 差分ではなく、両方の現在値を送る。Hub と Web はこのイベントの値を「現在の設定」として扱う。
+   */
+  | { type: 'model'; model?: string; effort?: EffortLevel }
   | { type: 'usage'; label: string; percent?: number; resetsAt?: string }
   | { type: 'error'; message: string; fatal: boolean };
 
@@ -143,7 +160,12 @@ export type UserAction =
   | { type: 'answer'; requestId: string; text: string }
   | { type: 'interrupt' }
   /** 実行中に権限モードを変える。反映できたら Driver が permission_mode イベントを送る。 */
-  | { type: 'set_permission_mode'; mode: PermissionMode };
+  | { type: 'set_permission_mode'; mode: PermissionMode }
+  /**
+   * 実行中にモデルとエフォートを変える。省略した項目は変えず、null はエージェントの既定に戻す。
+   * 反映できたら Driver が model イベントを送る。できなければ error（fatal: false）を送り、元の設定のままにする。
+   */
+  | { type: 'set_model'; model?: string | null; effort?: EffortLevel | null };
 
 /** 各 Driver パッケージが実装するインターフェース。 */
 export interface AgentDriver {
