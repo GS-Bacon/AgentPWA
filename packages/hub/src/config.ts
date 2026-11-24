@@ -15,8 +15,10 @@ export interface HubConfig {
   allowedUsers: string[];
   /** このPCのブラウザから http://127.0.0.1:<port> で直接開くのを許すか */
   allowLocalhost: boolean;
-  /** セッションを起動してよいフォルダ（許可リスト） */
+  /** セッションを起動してよいフォルダ（許可リスト）。画面から作ったプロジェクトもここに書き足す */
   folders: FolderEntry[];
+  /** 画面からプロジェクトを作ってよいルートフォルダ（絶対パス）。空なら画面からは作れない */
+  projectRoots: string[];
   /** claude CLI のパス（省略時は PATH と ~/.local/bin を探す） */
   claudePath?: string;
   /** Codex タブの Driver。'fake' はフィクスチャを流すだけの表示確認用 */
@@ -42,6 +44,7 @@ function defaults(configPath: string): HubConfig {
     allowedUsers: [],
     allowLocalhost: true,
     folders: [],
+    projectRoots: [],
     codex: 'fake',
     dataDir: path.dirname(configPath),
   };
@@ -54,6 +57,10 @@ function validate(c: HubConfig, file: string): HubConfig {
   if (!Array.isArray(c.folders)) errors.push('folders は配列にしてください');
   for (const f of c.folders ?? []) {
     if (!f || typeof f.path !== 'string' || !path.isAbsolute(f.path)) errors.push(`folders のパスは絶対パスにしてください: ${JSON.stringify(f)}`);
+  }
+  if (!Array.isArray(c.projectRoots)) errors.push('projectRoots は配列にしてください');
+  for (const r of c.projectRoots ?? []) {
+    if (typeof r !== 'string' || !path.isAbsolute(r)) errors.push(`projectRoots は絶対パスにしてください: ${JSON.stringify(r)}`);
   }
   if (c.codex !== 'fake' && c.codex !== 'driver') errors.push("codex は 'fake' か 'driver' にしてください");
   if (errors.length) throw new Error(`設定ファイル ${file} の誤り:\n- ${errors.join('\n- ')}`);
@@ -77,6 +84,7 @@ function validate(c: HubConfig, file: string): HubConfig {
     allowFullAuto: f.allowFullAuto === true,
     defaultPermissionMode: f.defaultPermissionMode ?? 'ask',
   }));
+  c.projectRoots = c.projectRoots.map((r) => path.resolve(r));
   return c;
 }
 
@@ -116,7 +124,7 @@ export function isModeAllowed(config: HubConfig, cwd: string, mode: PermissionMo
 }
 
 /**
- * 設定ファイルの変更を見張り、再起動なしで反映できる項目（folders / allowedUsers / allowLocalhost / machineName）を
+ * 設定ファイルの変更を見張り、再起動なしで反映できる項目（folders / projectRoots / allowedUsers / allowLocalhost / machineName）を
  * config に書き戻す。port・claudePath・codex・dataDir の変更は Hub の再起動が必要。
  */
 export function watchConfig(file: string, config: HubConfig, onChange: () => void): () => void {
@@ -125,6 +133,7 @@ export function watchConfig(file: string, config: HubConfig, onChange: () => voi
     try {
       const next = loadConfig(file).config;
       config.folders = next.folders;
+      config.projectRoots = next.projectRoots;
       config.allowedUsers = next.allowedUsers;
       config.allowLocalhost = next.allowLocalhost;
       config.machineName = next.machineName;

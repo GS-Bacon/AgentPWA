@@ -446,7 +446,7 @@ export function PhoneApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProps)
             <h1 style={{ fontSize: 22, fontWeight: 600 }}>設定</h1>
           </header>
           <main style={{ flex: '1 1 auto', overflowY: 'auto' }}>
-            <Settings />
+            <Settings fullscreen />
           </main>
         </>
       ) : (

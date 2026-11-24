@@ -2,13 +2,14 @@
 // プロジェクト（作業フォルダ）と AI を選んで始める。
 import { useState } from 'react';
 import { PERMISSION_MODES, type AgentKind, type EffortLevel, type PermissionMode } from '@agentpwa/shared';
-import type { SessionSummary } from '@agentpwa/hub/api';
+import type { FolderEntry, SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { showToast, useStore } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL, MODE_NOTE } from '../lib/format.ts';
 import { confirmFullAuto } from '../lib/sessionActions.ts';
 import { EFFORTS, EFFORT_LABEL, MODELS } from '../lib/models.ts';
-import { AgentIcon, IconClose } from './Icons.tsx';
+import { AgentIcon, IconClose, IconPlus } from './Icons.tsx';
+import { NewProjectForm } from './NewProject.tsx';
 
 const LAST_KEY = 'agentpwa.newSession.v1';
 
@@ -33,7 +34,11 @@ export function NewSessionForm({
 }) {
   const info = useStore((s) => s.info);
   const last = loadLast();
-  const folders = info?.folders ?? [];
+  // この画面で作ったプロジェクト。Hub から新しい folders が届くまでの間も選べるようにする
+  const [created, setCreated] = useState<FolderEntry | null>(null);
+  const [addingProject, setAddingProject] = useState(false);
+  const base = info?.folders ?? [];
+  const folders = created && !base.some((f) => f.path.toLowerCase() === created.path.toLowerCase()) ? [...base, created] : base;
   const [cwd, setCwdState] = useState(() => {
     const want = (initialCwd ?? last.cwd ?? '').toLowerCase();
     return folders.find((f) => f.path.toLowerCase() === want)?.path ?? folders[0]?.path ?? '';
@@ -55,6 +60,13 @@ export function NewSessionForm({
     setMode(defaultMode(p));
   };
   const [mode, setMode] = useState<PermissionMode>(() => defaultMode(cwd));
+  const onProjectCreated = (f: FolderEntry) => {
+    setCreated(f);
+    setAddingProject(false);
+    setCwdState(f.path);
+    if (!MODELS[f.agent].some((m) => m.value === model)) setModel('');
+    setMode(f.defaultPermissionMode ?? 'ask');
+  };
   const pickMode = async (m: PermissionMode) => {
     // 「すべて自動」は選ぶときに確認を1回挟む
     if (m === 'full_auto' && !(await confirmFullAuto())) return;
@@ -91,7 +103,7 @@ export function NewSessionForm({
         <div style={{ borderTop: '1px solid var(--border)' }}>
           {folders.length === 0 && (
             <p className="muted" style={{ padding: '12px 16px', fontSize: 13, borderBottom: '1px solid var(--border)' }}>
-              作業フォルダが登録されていません。Hub の設定ファイル（<span className="mono">{info?.configPath}</span>）の folders に追加してください（保存すると Hub が読み直します）。
+              プロジェクトがまだありません。下の「新しいプロジェクト」から作ってください。
             </p>
           )}
           {folders.map((f) => (
@@ -107,6 +119,16 @@ export function NewSessionForm({
               <span style={{ fontSize: 12, color: AGENT_COLOR[f.agent], flex: 'none' }}>{AGENT_LABEL[f.agent]}</span>
             </label>
           ))}
+          <button
+            className="choice"
+            style={{ width: '100%', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--link)', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+            onClick={() => setAddingProject(true)}
+          >
+            <span style={{ width: 18, display: 'flex', justifyContent: 'center', flex: 'none' }}>
+              <IconPlus size={14} />
+            </span>
+            <span style={{ flex: '1 1 auto' }}>新しいプロジェクト</span>
+          </button>
         </div>
       </fieldset>
       <fieldset className="form-section" style={{ margin: 0, padding: 0, border: 'none' }}>
@@ -194,22 +216,31 @@ export function NewSessionForm({
     </div>
   );
 
+  // 「新しいプロジェクト」はこの画面の上に重ねて開く（作ったらそのプロジェクトを選んだ状態で戻る）
+  const projectForm = addingProject && <NewProjectForm fullscreen={fullscreen} onClose={() => setAddingProject(false)} onCreated={onProjectCreated} />;
+
   if (fullscreen) {
     return (
-      <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', zIndex: 30 }}>
-        {head}
-        <div className="dialog-body">{body}</div>
-        {foot}
-      </div>
+      <>
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', zIndex: 30 }}>
+          {head}
+          <div className="dialog-body">{body}</div>
+          {foot}
+        </div>
+        {projectForm}
+      </>
     );
   }
   return (
-    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog" role="dialog" aria-modal="true" aria-label="新しいセッション">
-        {head}
-        <div className="dialog-body">{body}</div>
-        {foot}
+    <>
+      <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+        <div className="dialog" role="dialog" aria-modal="true" aria-label="新しいセッション">
+          {head}
+          <div className="dialog-body">{body}</div>
+          {foot}
+        </div>
       </div>
-    </div>
+      {projectForm}
+    </>
   );
 }

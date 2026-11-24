@@ -1,6 +1,15 @@
 // Hub の REST API
 import type { SessionEvent, UserAction } from '@agentpwa/shared';
-import type { CreateSessionRequest, DeleteSessionResult, HubInfo, SessionSummary, UpdateSessionRequest } from '@agentpwa/hub/api';
+import type {
+  CreateProjectRequest,
+  CreateSessionRequest,
+  DeleteSessionResult,
+  DirListing,
+  FolderEntry,
+  HubInfo,
+  SessionSummary,
+  UpdateSessionRequest,
+} from '@agentpwa/hub/api';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -35,4 +44,8 @@ export const api = {
   update: (id: string, patch: UpdateSessionRequest) => req<SessionSummary>('PATCH', `/api/sessions/${id}`, patch),
   /** 1件ずつ削除する（元に戻せない） */
   remove: (id: string) => req<DeleteSessionResult>('DELETE', `/api/sessions/${id}`),
+  /** ルートフォルダ（projectRoots）の下のサブフォルダ。path を省くとルートの一覧 */
+  dirs: (path?: string) => req<DirListing>('GET', `/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  /** プロジェクトを作る（Hub が設定ファイルの folders に書き足す） */
+  createProject: (body: CreateProjectRequest) => req<FolderEntry>('POST', '/api/projects', body),
 };

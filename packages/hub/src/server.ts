@@ -5,9 +5,10 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { EFFORT_LEVELS, PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type EffortLevel, type PermissionMode, type SessionEvent, type UserAction } from '@agentpwa/shared';
-import type { CreateSessionRequest, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
+import type { CreateProjectRequest, CreateSessionRequest, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
+import { createProject, listDirs, type ProjectDeps } from './projects.ts';
 import { HttpError, type SessionManager } from './sessions.ts';
 
 declare module 'fastify' {
@@ -102,13 +103,25 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       usage: Object.fromEntries(AGENTS.map((a) => [a, manager.usageOf(a)])) as HubInfo['usage'],
       configPath: opts.configPath,
       protocolVersion: PROTOCOL_VERSION,
+      projectRoots: config.projectRoots,
     };
   }
+
+  const projectDeps: ProjectDeps = {
+    config,
+    configPath: opts.configPath,
+    agentAvailable: async (a) => (await manager.checkAuth(a)).ok,
+    onChanged: () => manager.notifyConfigChanged(),
+  };
 
   await app.register(fastifyWebsocket);
 
   app.get('/api/info', async (req) => info(req));
   app.get('/api/sessions', async () => manager.list());
+
+  // プロジェクトの作成（ルートフォルダ projectRoots の下だけ。作ったものは設定ファイルの folders に書き足す）
+  app.get<{ Querystring: { path?: string } }>('/api/fs/dirs', async (req) => listDirs(config, req.query.path || undefined));
+  app.post('/api/projects', async (req) => createProject(projectDeps, (req.body ?? {}) as Partial<CreateProjectRequest>));
 
   app.post('/api/sessions', async (req) => {
     const b = (req.body ?? {}) as Partial<CreateSessionRequest>;

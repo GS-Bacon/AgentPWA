@@ -1,10 +1,12 @@
-// 設定（Hub の状態、認証、フォルダの許可リスト、表示）
+// 設定（Hub の状態、認証、プロジェクト、表示）
+import { useState } from 'react';
 import type { AgentKind } from '@agentpwa/shared';
 import { useStore } from '../lib/store.ts';
 import { resetLayout } from '../lib/layout.ts';
 import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL } from '../lib/format.ts';
 import { UsageBars } from './common.tsx';
-import { AgentIcon } from './Icons.tsx';
+import { AgentIcon, IconPlus } from './Icons.tsx';
+import { NewProjectForm } from './NewProject.tsx';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -24,10 +26,12 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-export function Settings() {
+/** fullscreen: iPhone では「新しいプロジェクト」を全画面で開く */
+export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
   const info = useStore((s) => s.info);
   const connected = useStore((s) => s.connected);
   const usage = useStore((s) => s.usage);
+  const [adding, setAdding] = useState(false);
   return (
     <div style={{ paddingBottom: 24 }}>
       <Section title="Hub">
@@ -58,7 +62,12 @@ export function Settings() {
           );
         })}
       </Section>
-      <Section title="プロジェクト（作業フォルダの許可リスト）">
+      <Section title="プロジェクト">
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
+          <button className="btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setAdding(true)}>
+            <IconPlus size={14} /> 新しいプロジェクト
+          </button>
+        </div>
         {(info?.folders ?? []).map((f) => (
           <Row key={f.path} label={f.name}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: AGENT_COLOR[f.agent], fontSize: 13 }}>
@@ -72,7 +81,15 @@ export function Settings() {
           </Row>
         ))}
         <p className="muted" style={{ padding: '10px 16px', fontSize: 12 }}>
-          追加・削除と AI の指定（agent: "claude" / "codex"）、「すべて自動」の許可（allowFullAuto: true）、既定の権限モード（defaultPermissionMode）は、設定ファイルの folders を編集して保存します。Hub が自動で読み直します（管理画面は後のフェーズ）。
+          画面から作れるのは、設定ファイルの projectRoots（ルートフォルダ）の下のフォルダだけです
+          {info?.projectRoots.length ? (
+            <>
+              （<span className="mono">{info.projectRoots.join(' / ')}</span>）
+            </>
+          ) : (
+            '（未設定のため、いまは画面から作れません）'
+          )}
+          。作ったプロジェクトは設定ファイルの folders に書き足されます。変更・削除は、設定ファイルの folders を編集して保存します（Hub が自動で読み直します）。
         </p>
       </Section>
       <Section title="表示">
@@ -90,6 +107,7 @@ export function Settings() {
           </button>
         </div>
       </Section>
+      {adding && <NewProjectForm fullscreen={fullscreen} onClose={() => setAdding(false)} onCreated={() => setAdding(false)} />}
     </div>
   );
 }

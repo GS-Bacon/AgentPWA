@@ -74,6 +74,7 @@ beforeEach(() => {
       { name: 'cx', path: path.join(dir, 'cx'), agent: 'codex' },
       { name: 'free', path: path.join(dir, 'free'), agent: 'claude', allowFullAuto: true, defaultPermissionMode: 'auto_edit' },
     ],
+    projectRoots: [],
     codex: 'fake',
     dataDir: dir,
   };
