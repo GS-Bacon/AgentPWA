@@ -209,84 +209,124 @@ export function QuestionCard({ session, req }: { session: SessionSummary; req: Q
   const answers = questions.map((q, i) => draftAnswer(q, drafts[i]));
   const ready = answers.every((a) => a.trim());
 
+  // 複数の問いは1問ずつ出し、「次へ」「戻る」と上の段の見出しで行き来する（Claude デスクトップアプリと同じ流れ）
+  const [step, setStep] = useState(0);
+  const multi = questions.length > 1;
+  const last = step === questions.length - 1;
+  const go = (i: number) => setStep(Math.max(0, Math.min(questions.length - 1, i)));
+
+  const q = questions[step];
+  const d = drafts[step];
+  const toggle = (label: string) => {
+    if (quick) return void submit([label]);
+    if (q.multiSelect) {
+      setDraft(step, { ...d, picked: d.picked.includes(label) ? d.picked.filter((p) => p !== label) : [...d.picked, label] });
+      return;
+    }
+    const off = d.picked[0] === label;
+    setDraft(step, { picked: off ? [] : [label], other: '' });
+    // 単一選択は、選んだら次の問いへ進む（最後の問いでは進まず、回答ボタンで送る）
+    if (!off && !last) go(step + 1);
+  };
+  const inputId = `ans-${req.requestId}-${step}`;
+
   return (
     <section className="ask ask-q" aria-label="質問">
       <div className="ask-head">
-        <h3>{questions.length > 1 ? `質問（${questions.length}件）` : '質問'}</h3>
+        <h3>{multi ? `質問 ${step + 1} / ${questions.length}` : '質問'}</h3>
         <span className="muted" style={{ fontSize: 12 }}>{elapsed(req.at, now)}</span>
       </div>
+      {multi && (
+        <nav className="q-steps" aria-label="問いの一覧">
+          {questions.map((x, i) => (
+            <button
+              key={i}
+              type="button"
+              className="q-step"
+              aria-current={i === step ? 'step' : undefined}
+              data-done={answers[i].trim() ? 'true' : undefined}
+              onClick={() => go(i)}
+            >
+              <span aria-hidden="true">{answers[i].trim() ? '✓' : i + 1}</span>
+              <span className="ellipsis">{x.header || `質問 ${i + 1}`}</span>
+            </button>
+          ))}
+        </nav>
+      )}
       <form
         className="ask-body"
         onSubmit={(e) => {
           e.preventDefault();
-          void submit(answers);
+          // Enter: 途中の問いなら次へ、最後の問いなら送る
+          if (!last) go(step + 1);
+          else void submit(answers);
         }}
       >
-        {questions.map((q, i) => {
-          const d = drafts[i];
-          const toggle = (label: string) => {
-            if (quick) return void submit([label]);
-            if (q.multiSelect) setDraft(i, { ...d, picked: d.picked.includes(label) ? d.picked.filter((p) => p !== label) : [...d.picked, label] });
-            else setDraft(i, { picked: d.picked[0] === label ? [] : [label], other: '' });
-          };
-          const inputId = `ans-${req.requestId}-${i}`;
-          return (
-            <fieldset key={i} className="q-item">
-              <legend className="sr-only">{q.header || q.question}</legend>
-              {(q.header || q.multiSelect) && (
-                <div className="q-meta">
-                  {q.header && <span className="q-header">{q.header}</span>}
-                  {q.multiSelect && <span className="muted">複数選択できます</span>}
-                </div>
-              )}
-              <p style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{q.question}</p>
-              {q.options.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {q.options.map((o) => {
-                    const on = d.picked.includes(o.label);
-                    return (
-                      <button
-                        key={o.label}
-                        type="button"
-                        className="btn q-opt"
-                        aria-pressed={quick ? undefined : on}
-                        disabled={busy}
-                        onClick={() => toggle(o.label)}
-                      >
-                        <span className="q-opt-label">
-                          {!quick && <span className="q-mark" aria-hidden="true">{q.multiSelect ? (on ? '☑' : '☐') : on ? '●' : '○'}</span>}
-                          {o.label}
-                        </span>
-                        {o.description && <span className="q-opt-desc">{o.description}</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              <label className="sr-only" htmlFor={inputId}>
-                {q.options.length > 0 ? 'その他の回答' : '回答'}
-              </label>
-              <input
-                id={inputId}
-                className="input"
-                style={{ height: 40 }}
-                placeholder={q.options.length > 0 ? (q.multiSelect ? 'その他（自由記述・選択に追加）…' : 'その他（自由記述）…') : '自由に回答…'}
-                value={d.other}
-                disabled={busy}
-                onChange={(e) => setDraft(i, { picked: q.multiSelect || !e.target.value ? d.picked : [], other: e.target.value })}
-              />
-            </fieldset>
-          );
-        })}
+        <fieldset key={step} className="q-item">
+          <legend className="sr-only">{q.header || q.question}</legend>
+          {((!multi && q.header) || q.multiSelect) && (
+            <div className="q-meta">
+              {!multi && q.header && <span className="q-header">{q.header}</span>}
+              {q.multiSelect && <span className="muted">複数選択できます</span>}
+            </div>
+          )}
+          <p style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{q.question}</p>
+          {q.options.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {q.options.map((o) => {
+                const on = d.picked.includes(o.label);
+                return (
+                  <button
+                    key={o.label}
+                    type="button"
+                    className="btn q-opt"
+                    aria-pressed={quick ? undefined : on}
+                    disabled={busy}
+                    onClick={() => toggle(o.label)}
+                  >
+                    <span className="q-opt-label">
+                      {!quick && <span className="q-mark" aria-hidden="true">{q.multiSelect ? (on ? '☑' : '☐') : on ? '●' : '○'}</span>}
+                      {o.label}
+                    </span>
+                    {o.description && <span className="q-opt-desc">{o.description}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <label className="sr-only" htmlFor={inputId}>
+            {q.options.length > 0 ? 'その他の回答' : '回答'}
+          </label>
+          <input
+            id={inputId}
+            className="input"
+            style={{ height: 40 }}
+            placeholder={q.options.length > 0 ? (q.multiSelect ? 'その他（自由記述・選択に追加）…' : 'その他（自由記述）…') : '自由に回答…'}
+            value={d.other}
+            disabled={busy}
+            onChange={(e) => setDraft(step, { picked: q.multiSelect || !e.target.value ? d.picked : [], other: e.target.value })}
+          />
+        </fieldset>
         <div className="ask-actions" style={{ justifyContent: 'flex-end' }}>
-          {!ready && questions.length > 1 && (
+          {multi && last && !ready && (
             <span className="muted" style={{ fontSize: 12 }}>
-              残り {answers.filter((a) => !a.trim()).length} 問
+              未回答 {answers.filter((a) => !a.trim()).length} 問
             </span>
           )}
-          <button className="btn btn-primary" style={{ height: 40 }} disabled={busy || !ready}>
-            回答
-          </button>
+          {multi && step > 0 && (
+            <button type="button" className="btn" style={{ height: 40 }} disabled={busy} onClick={() => go(step - 1)}>
+              戻る
+            </button>
+          )}
+          {multi && !last ? (
+            <button type="submit" className="btn btn-primary" style={{ height: 40 }} disabled={busy}>
+              次へ
+            </button>
+          ) : (
+            <button type="submit" className="btn btn-primary" style={{ height: 40 }} disabled={busy || !ready}>
+              回答
+            </button>
+          )}
         </div>
       </form>
     </section>
