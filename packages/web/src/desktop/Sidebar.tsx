@@ -1,5 +1,5 @@
 // iPad / Web の左の一覧: プロジェクト（作業フォルダ）ごとにセッションをまとめる。
-// プロジェクト名の横のアイコンはそのプロジェクトの既定の AI。既定と違う AI のセッションは、行にもアイコンを付ける。
+// AI はプロジェクトごとに固定なので、プロジェクト名の横のアイコンだけで示す。
 import { useCallback, useState } from 'react';
 import type { AgentKind } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
@@ -34,7 +34,7 @@ type Update = (fn: (s: LayoutState) => LayoutState) => void;
 /** 行の右クリック・長押しでメニューを開く */
 type OnMenu = (id: string, x: number, y: number) => void;
 
-function SideRow({ s, projectAgent, paneNo, selected, now, onOpen, onMenu }: { s: SessionSummary; projectAgent?: AgentKind; paneNo?: number; selected: boolean; now: number; onOpen: () => void; onMenu: OnMenu }) {
+function SideRow({ s, paneNo, selected, now, onOpen, onMenu }: { s: SessionSummary; paneNo?: number; selected: boolean; now: number; onOpen: () => void; onMenu: OnMenu }) {
   const longPress = useLongPress((x, y) => onMenu(s.id, x, y));
   const sub = s.archived ? (
     <span className="srow-sub ellipsis muted">
@@ -86,14 +86,7 @@ function SideRow({ s, projectAgent, paneNo, selected, now, onOpen, onMenu }: { s
         </span>
       )}
       <span className="srow-main">
-        <span className="srow-title ellipsis" style={s.rank === 5 ? { fontWeight: 500 } : undefined}>
-          {projectAgent && s.agent !== projectAgent && (
-            <span title={AGENT_LABEL[s.agent]} style={{ marginRight: 4, verticalAlign: '-2px' }}>
-              <AgentIcon agent={s.agent} size={12} />
-            </span>
-          )}
-          {s.title}
-        </span>
+        <span className="srow-title ellipsis" style={s.rank === 5 ? { fontWeight: 500 } : undefined}>{s.title}</span>
         {sub}
       </span>
       <PinMark s={s} />
@@ -173,7 +166,7 @@ function ProjectGroup({
           onClick={toggle}
           aria-expanded={!collapsed}
           style={{ all: 'unset', cursor: 'pointer', flex: '1 1 auto', minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 0' }}
-          title={`${p.path}（既定の AI: ${AGENT_LABEL[p.agent]}）`}
+          title={`${p.path}（${AGENT_LABEL[p.agent]}）`}
         >
           <span aria-hidden="true" style={{ color: 'var(--fg-muted)', width: 12, display: 'inline-block', transform: collapsed ? 'none' : 'rotate(90deg)', transition: 'transform .1s' }}>
             ▸
@@ -197,7 +190,7 @@ function ProjectGroup({
         ) : (
           <>
             {page.shown.map((s) => (
-              <SideRow key={s.id} s={s} projectAgent={p.agent} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSessionInNewPane(l, s.id))} onMenu={onMenu} />
+              <SideRow key={s.id} s={s} now={now} paneNo={paneNo.get(s.id)} selected={s.id === focusedSession} onOpen={() => update((l) => openSessionInNewPane(l, s.id))} onMenu={onMenu} />
             ))}
             <ShowMoreButton rest={page.rest} onClick={page.more} />
           </>

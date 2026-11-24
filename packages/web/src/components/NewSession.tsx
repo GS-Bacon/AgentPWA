@@ -63,10 +63,9 @@ export function NewSessionForm({
     const want = (initialCwd ?? last.cwd ?? '').toLowerCase();
     return folders.find((f) => f.path.toLowerCase() === want)?.path ?? folders[0]?.path ?? '';
   });
+  // AI はプロジェクトごとに固定（Hub の設定ファイルの folders の agent）
   const folder = folders.find((f) => f.path === cwd);
-  // AI は同じプロジェクトでもセッションごとに選べる。初めはプロジェクトの既定（Hub の設定ファイルの folders の agent）
-  const folderAgent = (p: string): AgentKind => folders.find((f) => f.path === p)?.agent ?? 'claude';
-  const [agent, setAgentState] = useState<AgentKind>(() => folderAgent(cwd));
+  const agent: AgentKind = folder?.agent ?? 'claude';
   const allowFullAuto = folder?.allowFullAuto === true;
   // 権限モードの既定はプロジェクトの設定（defaultPermissionMode）。なければ「毎回確認」
   const defaultMode = (p: string): PermissionMode => folders.find((f) => f.path === p)?.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE;
@@ -80,21 +79,14 @@ export function NewSessionForm({
   };
   const setCwd = (p: string) => {
     setCwdState(p);
-    const a = folderAgent(p);
-    setAgentState(a);
-    pickChoice(p, a);
+    pickChoice(p, folders.find((f) => f.path === p)?.agent ?? 'claude');
     setMode(defaultMode(p));
-  };
-  const setAgent = (a: AgentKind) => {
-    setAgentState(a);
-    pickChoice(cwd, a);
   };
   const [mode, setMode] = useState<PermissionMode>(() => defaultMode(cwd));
   const onProjectCreated = (f: FolderEntry) => {
     setCreated(f);
     setAddingProject(false);
     setCwdState(f.path);
-    setAgentState(f.agent);
     pickChoice(f.path, f.agent);
     setMode(f.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE);
   };
@@ -114,7 +106,7 @@ export function NewSessionForm({
     if (!cwd || busy) return;
     setBusy(true);
     try {
-      const s = await api.create({ cwd, agent, model: model || undefined, effort: effort || undefined, permissionMode: mode, prompt: prompt.trim() || undefined });
+      const s = await api.create({ cwd, model: model || undefined, effort: effort || undefined, permissionMode: mode, prompt: prompt.trim() || undefined });
       try {
         localStorage.setItem(LAST_KEY, JSON.stringify({ cwd }));
       } catch {
@@ -150,6 +142,7 @@ export function NewSessionForm({
                 </span>
                 <span className="mono muted ellipsis" style={{ fontSize: 11 }}>{f.path}</span>
               </span>
+              <span style={{ fontSize: 12, color: AGENT_COLOR[f.agent], flex: 'none' }}>{AGENT_LABEL[f.agent]}</span>
             </label>
           ))}
           <button
@@ -162,27 +155,6 @@ export function NewSessionForm({
             </span>
             <span style={{ flex: '1 1 auto' }}>新しいプロジェクト</span>
           </button>
-        </div>
-      </fieldset>
-      <fieldset className="form-section" style={{ margin: 0, padding: 0, border: 'none' }}>
-        <legend className="form-legend">AI</legend>
-        <div style={{ borderTop: '1px solid var(--border)' }}>
-          {(['claude', 'codex'] as AgentKind[]).map((a) => {
-            const usable = info?.agents[a]?.auth.ok === true;
-            return (
-              <label key={a} className={`choice${agent === a ? ' checked' : ''}`} style={usable || agent === a ? undefined : { opacity: 0.5 }}>
-                <input type="radio" name="agent" checked={agent === a} disabled={!usable} onChange={() => setAgent(a)} />
-                <span style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', gap: 6, color: AGENT_COLOR[a] }}>
-                  <AgentIcon agent={a} /> {AGENT_LABEL[a]}
-                </span>
-                {!usable ? (
-                  <span className="muted" style={{ fontSize: 12, flex: 'none' }}>このマシンでは使えません</span>
-                ) : (
-                  folder?.agent === a && <span className="muted" style={{ fontSize: 12, flex: 'none' }}>このプロジェクトの既定</span>
-                )}
-              </label>
-            );
-          })}
         </div>
       </fieldset>
       <fieldset className="form-section" style={{ margin: 0, padding: 0, border: 'none' }}>

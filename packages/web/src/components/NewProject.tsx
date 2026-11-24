@@ -209,7 +209,7 @@ export function NewProjectForm({
         </fieldset>
       )}
       <fieldset className="form-section" style={fieldset}>
-        <Legend>既定の AI（セッションごとに選び直せます）</Legend>
+        <Legend>使う AI（プロジェクトごとに固定）</Legend>
         <div style={listBox}>
           {(['claude', 'codex'] as AgentKind[]).map((a) => (
             <label key={a} className={`choice${agent === a ? ' checked' : ''}`} style={usable(a) ? undefined : { opacity: 0.5 }}>
