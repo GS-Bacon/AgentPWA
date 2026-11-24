@@ -1,0 +1,20 @@
+{"type":"status","status":"starting"}
+{"type":"resume_token","token":"fake-thread-interrupt"}
+{"type":"message","messageId":"u1","role":"user","text":"型エラーをすべて解消して"}
+{"type":"status","status":"running"}
+{"type":"tool","toolId":"c1","name":"shell","summary":"npx tsc --noEmit","state":"running"}
+{"type":"tool","toolId":"c1","name":"shell","summary":"npx tsc --noEmit","state":"done","output":"src/api.ts(42,7): error TS2322: Type 'string' is not assignable to type 'number'.\nsrc/ui/list.tsx(18,3): error TS2741: Property 'key' is missing."}
+{"type":"message","messageId":"a1","role":"assistant","text":"型エラーが 2 件あります。順に直します。"}
+{"type":"tool","toolId":"c2","name":"apply_patch","summary":"src/api.ts +2 −2","state":"done"}
+{"type":"tool","toolId":"c3","name":"shell","summary":"npx tsc --noEmit --watch","state":"running"}
+{"type":"_sleep","ms":4000}
+{"type":"tool","toolId":"c4","name":"shell","summary":"npm run lint","state":"running"}
+{"type":"_sleep","ms":4000}
+{"type":"tool","toolId":"c5","name":"shell","summary":"npm run build","state":"running"}
+{"type":"_sleep","ms":4000}
+{"type":"tool","toolId":"c6","name":"shell","summary":"npm test","state":"running"}
+{"type":"_sleep","ms":4000}
+{"type":"tool","toolId":"c7","name":"shell","summary":"npm test -- --coverage","state":"running"}
+{"type":"_sleep","ms":4000}
+{"type":"message","messageId":"a2","role":"assistant","text":"（このフィクスチャは途中で「中断」を押して確認するためのものです）"}
+{"type":"status","status":"idle"}

@@ -1,0 +1,68 @@
+// 線のアイコン（装飾なので aria-hidden）
+import type { ReactNode } from 'react';
+
+function Svg({ size = 16, children, fill = false, sw = 2 }: { size?: number; children: ReactNode; fill?: boolean; sw?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={fill ? 'currentColor' : 'none'}
+      stroke={fill ? 'none' : 'currentColor'}
+      strokeWidth={sw}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+export const IconPlus = (p: { size?: number }) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>;
+export const IconClose = (p: { size?: number }) => <Svg {...p}><path d="M6 6l12 12M18 6L6 18" /></Svg>;
+export const IconChat = (p: { size?: number }) => <Svg {...p}><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /></Svg>;
+export const IconCode = (p: { size?: number }) => <Svg {...p}><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16" /></Svg>;
+export const IconGear = (p: { size?: number }) => (
+  <Svg {...p}><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /></Svg>
+);
+export const IconBack = (p: { size?: number }) => <Svg {...p}><path d="M15 18l-6-6 6-6" /></Svg>;
+export const IconMore = (p: { size?: number }) => (
+  <Svg {...p} fill><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></Svg>
+);
+export const IconSend = (p: { size?: number }) => <Svg {...p} sw={2.2}><path d="M12 19V5M5 12l7-7 7 7" /></Svg>;
+export const IconStop = (p: { size?: number }) => <Svg {...p} fill><rect x="6" y="6" width="12" height="12" /></Svg>;
+export const IconMaximize = (p: { size?: number }) => <Svg {...p}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></Svg>;
+export const IconSidebar = (p: { size?: number }) => <Svg {...p}><rect x="3" y="4" width="18" height="16" /><path d="M9 4v16" /></Svg>;
+export const IconSplitDown = (p: { size?: number }) => <Svg {...p}><rect x="3" y="4" width="18" height="16" /><path d="M3 12h18" /></Svg>;
+export const IconSplitRight = (p: { size?: number }) => <Svg {...p}><rect x="3" y="4" width="18" height="16" /><path d="M12 4v16" /></Svg>;
+
+export const LayoutIcons = {
+  cols1: () => <Svg><rect x="3" y="4" width="18" height="16" /></Svg>,
+  cols2: () => <Svg><rect x="3" y="4" width="18" height="16" /><path d="M12 4v16" /></Svg>,
+  cols3: () => <Svg><rect x="3" y="4" width="18" height="16" /><path d="M9 4v16M15 4v16" /></Svg>,
+  grid4: () => <Svg><rect x="3" y="4" width="18" height="16" /><path d="M12 4v16M3 12h18" /></Svg>,
+  custom: () => <Svg><rect x="3" y="4" width="18" height="16" /><path d="M10 4v16M10 11h11" /></Svg>,
+};
+
+/** AI のアイコン（Claude は橙の吹き出し、Codex は青の </>）。プロジェクトに固定された AI を示す */
+export function AgentIcon({ agent, size = 14 }: { agent: 'claude' | 'codex'; size?: number }) {
+  const color = agent === 'claude' ? 'var(--claude)' : 'var(--codex)';
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth={2.3}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role="img"
+      aria-label={agent === 'claude' ? 'Claude' : 'Codex'}
+      style={{ flex: 'none', verticalAlign: '-2px' }}
+    >
+      {agent === 'claude' ? <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /> : <path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16" />}
+    </svg>
+  );
+}

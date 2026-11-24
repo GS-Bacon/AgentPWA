@@ -1,0 +1,12 @@
+{
+  "port": 8787,
+  "machineName": "laptop",
+  "allowedUsers": ["you@example.com"],
+  "allowLocalhost": true,
+  "folders": [
+    { "name": "AgentPWA", "path": "C:\\Users\\you\\Documents\\AgentPWA", "agent": "claude" },
+    { "name": "services-api", "path": "C:\\Users\\you\\work\\services-api", "agent": "codex" }
+  ],
+  "claudePath": "C:\\Users\\you\\.local\\bin\\claude.exe",
+  "codex": "fake"
+}

@@ -1,0 +1,13 @@
+{"type":"message","messageId":"u-mwu3p9ec-0","role":"user","text":"Run the shell command 'ping -n 30 127.0.0.1' with the Bash tool and summarize it."}
+{"type":"status","status":"running"}
+{"type":"resume_token","token":"29b69bcc-3271-45e1-86bc-740b3961c06a"}
+{"type":"tool","toolId":"toolu_01TPjc7hFvoveMyY19PqtZAp","name":"Bash","summary":"ping -n 30 127.0.0.1","state":"running"}
+{"type":"approval_request","requestId":"toolu_01TPjc7hFvoveMyY19PqtZAp","kind":"command","title":"コマンドの実行許可","command":"ping -n 30 127.0.0.1","cwd":"C:/work/demo","choices":["allow","allow_session","deny"]}
+{"type":"status","status":"waiting_approval"}
+{"type":"usage","label":"セッション枠（5時間）","percent":25,"resetsAt":"2026-11-24T05:20:00.000Z"}
+{"type":"usage","label":"週間","percent":6,"resetsAt":"2026-11-29T06:00:00.000Z"}
+{"type":"approval_resolved","requestId":"toolu_01TPjc7hFvoveMyY19PqtZAp","decision":"allow"}
+{"type":"status","status":"running"}
+{"type":"tool","toolId":"toolu_01TPjc7hFvoveMyY19PqtZAp","name":"Bash","summary":"ping -n 30 127.0.0.1","state":"failed","output":"The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed. Correction to the text above: this call was stopped while running, not refused before it ran. It may have run in part or in full, and its changes may have been written. No permission prompt was involved. Work it started elsewhere (a remote command, a background process) may still be running, so check before starting the same work again. The instruction to stop and wait still stands."}
+{"type":"status","status":"idle","reason":"中断しました"}
+{"type":"status","status":"stopped"}

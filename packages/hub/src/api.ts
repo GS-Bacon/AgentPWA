@@ -1,0 +1,88 @@
+// Hub ⇔ Web の API で使う型（Web からは `import type` だけで参照する）。
+// Driver との契約（@agentpwa/shared）とは別に、Hub が Web に見せる形をここで決める。
+import type { AgentKind, AuthCheck, DriverEvent, PermissionMode, SessionEvent, SessionStatus } from '@agentpwa/shared';
+
+export type ApprovalRequest = Extract<DriverEvent, { type: 'approval_request' }> & { at: string };
+export type QuestionRequest = Extract<DriverEvent, { type: 'question' }> & { at: string };
+export type UsageInfo = Extract<DriverEvent, { type: 'usage' }>;
+
+/**
+ * 表示の優先順位（docs/architecture.md「表示の優先順位」）。
+ * 1 許可待ち / 2 質問待ち / 3 完了・未読 / 4 実行中 / 5 アイドル・停止
+ */
+export type Rank = 1 | 2 | 3 | 4 | 5;
+
+export interface SessionSummary {
+  id: string;
+  agent: AgentKind;
+  title: string;
+  cwd: string;
+  folderName: string;
+  machine: string;
+  model?: string;
+  permissionMode: PermissionMode;
+  status: SessionStatus;
+  statusReason?: string;
+  /** 今の状態になった時刻（待ち時間の表示と並べ替えに使う） */
+  statusSince: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSeq: number;
+  readSeq: number;
+  unread: boolean;
+  rank: Rank;
+  /** 再開できるか（resume_token を受け取っているか） */
+  resumable: boolean;
+  /** Driver のプロセスが動いているか */
+  live: boolean;
+  archived: boolean;
+  /** 一覧に出す直近の動き（例: 'Edit src/api.ts'） */
+  activity?: string;
+  lastError?: string;
+  pendingApprovals: ApprovalRequest[];
+  pendingQuestions: QuestionRequest[];
+}
+
+/** プロジェクト（作業フォルダ）。使う AI はプロジェクトごとに固定する */
+export interface FolderEntry {
+  name: string;
+  path: string;
+  agent: AgentKind;
+}
+
+export interface AgentInfo {
+  auth: AuthCheck;
+  /** 表示確認用のフェイク Driver で動いているか */
+  fake: boolean;
+}
+
+export interface HubInfo {
+  machine: string;
+  /** Tailscale-User-Login（このPCから直接開いたときは undefined） */
+  user?: string;
+  folders: FolderEntry[];
+  agents: Record<AgentKind, AgentInfo>;
+  usage: Record<AgentKind, UsageInfo[]>;
+  configPath: string;
+  protocolVersion: number;
+}
+
+export interface CreateSessionRequest {
+  /** 省略時はプロジェクトの AI。指定してプロジェクトの AI と違えば 400 */
+  agent?: AgentKind;
+  /** 許可リストのフォルダのパス */
+  cwd: string;
+  model?: string;
+  permissionMode: PermissionMode;
+  prompt?: string;
+  title?: string;
+}
+
+/** WebSocket で Hub から Web へ送るメッセージ */
+export type ServerMessage =
+  | { type: 'hello'; sessions: SessionSummary[]; info: HubInfo }
+  | { type: 'session'; session: SessionSummary }
+  | { type: 'event'; event: SessionEvent }
+  | { type: 'usage'; agent: AgentKind; usage: UsageInfo[] }
+  /** 設定ファイルが読み直されたとき */
+  | { type: 'info'; info: HubInfo };
