@@ -8,3 +8,4 @@ dist/
 .env.*
 *.log
 packages/web/dev-dist/
+.claude/
