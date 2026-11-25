@@ -1,11 +1,13 @@
-// 入力欄: 指示の送信、ファイルの添付（選ぶ・貼り付け・ドロップ）、スラッシュコマンドの補完。
-// 振る舞いは Claude のデスクトップアプリに合わせる（/ で補完が出る、画像は貼り付けで添付できる）。
+// 入力欄: 指示の送信、ファイルの添付（選ぶ・貼り付け・ドロップ）、補完（/ でコマンド、@ でファイル、# でプロジェクトの候補）。
+// 振る舞いは Claude のデスクトップアプリに合わせる（/ と @ で補完が出る、画像は貼り付けで添付できる）。
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { clearDraft, run, showToast, useStore } from '../lib/store.ts';
 import { isRunning } from '../lib/format.ts';
-import { filterCommands, slashQuery, useCommands } from '../lib/commands.ts';
+import { filterCommands, useCommands } from '../lib/commands.ts';
+import { applyCompletion, filterTags, findTrigger, useMentions, type Trigger } from '../lib/completion.ts';
+import { projectTags } from '../lib/projects.ts';
 import { formatBytes, MAX_ATTACHMENTS, MAX_TOTAL_BYTES, nameForPasted, releasePending, toAttachment, toPending, type PendingFile } from '../lib/attachments.ts';
 import { IconClose, IconFile, IconPaperclip, IconSend, IconStop } from './Icons.tsx';
 import { PermissionButton, usePermissionSwitch } from './PermissionMode.tsx';
@@ -68,6 +70,20 @@ function FileChips({ files, onRemove, disabled }: { files: PendingFile[]; onRemo
   );
 }
 
+/** 補完の候補の1行 */
+interface MenuItem {
+  key: string;
+  /** 記号（/ @ #）の後ろに入る文字 */
+  value: string;
+  label: string;
+  hint?: string;
+  desc?: string;
+  /** フォルダ（選んでも閉じず、中の候補を続けて出す） */
+  dir?: boolean;
+}
+
+const MENU_LABEL: Record<Trigger['kind'], string> = { command: 'コマンド', file: 'ファイル', tag: '候補' };
+
 export function Composer({ session, compact, files }: { session: SessionSummary; compact?: boolean; files: FilesState }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -94,23 +110,46 @@ export function Composer({ session, compact, files }: { session: SessionSummary;
     clearDraft(draft.n);
   }, [draft]);
 
-  // ---- スラッシュコマンドの補完 ----
-  const query = slashQuery(text);
+  // ---- 補完（/ でコマンド、@ でファイル、# でプロジェクトの候補） ----
+  // カーソルの位置で決まるので、入力と選択のたびに覚えておく
+  const [caret, setCaret] = useState(0);
+  const tags = useStore((s) => projectTags(s.info, session));
+  const found = archived ? null : findTrigger(text, Math.min(caret, text.length));
+  const trigger: Trigger | null =
+    found && ((found.kind === 'command' && features?.commands === true) || found.kind === 'file' || (found.kind === 'tag' && tags.length > 0)) ? found : null;
   const [dismissed, setDismissed] = useState<string | null>(null);
-  const menuWanted = features?.commands === true && query !== null && dismissed !== text && !archived;
-  const commands = useCommands(session.id, menuWanted);
-  const matches = menuWanted ? filterCommands(commands.list, query ?? '') : [];
-  const menuOpen = menuWanted && (matches.length > 0 || commands.loading || !!commands.error);
+  const menuWanted = trigger !== null && dismissed !== text;
+  const commands = useCommands(session.id, menuWanted && trigger?.kind === 'command');
+  const mentions = useMentions(session.id, menuWanted && trigger?.kind === 'file' ? trigger.query : null);
+  const items: MenuItem[] = !menuWanted
+    ? []
+    : trigger.kind === 'command'
+      ? filterCommands(commands.list, trigger.query).map((c) => ({ key: c.name, value: c.name, label: `/${c.name}`, hint: c.argumentHint, desc: c.description }))
+      : trigger.kind === 'tag'
+        ? filterTags(tags, trigger.query).map((t) => ({ key: t.name, value: t.name, label: `#${t.name}`, desc: t.description }))
+        : mentions.list.map((m) => ({ key: m.path, value: m.path, label: m.path, dir: m.kind === 'dir' }));
+  const source: { loading: boolean; error?: string } = trigger?.kind === 'command' ? commands : trigger?.kind === 'file' ? mentions : { loading: false };
+  const menuOpen = menuWanted && (items.length > 0 || source.loading || !!source.error);
   const [sel, setSel] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => setSel(0), [query]);
+  useEffect(() => setSel(0), [trigger?.kind, trigger?.query]);
   useEffect(() => {
     menuRef.current?.querySelector(`[data-i="${sel}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [sel]);
 
-  const complete = (name: string) => {
-    setText(`/${name} `);
-    ref.current?.focus();
+  const complete = (item: MenuItem) => {
+    const el = ref.current;
+    // 押したときに日本語入力が確定して文字が変わることがあるので、いまの入力欄から範囲を取り直す
+    const cur = el?.value ?? text;
+    const t = findTrigger(cur, el?.selectionStart ?? caret) ?? trigger;
+    if (!t) return;
+    const next = applyCompletion(cur, t, item.value, item.dir);
+    setText(next.text);
+    setCaret(next.caret);
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(next.caret, next.caret);
+    });
   };
 
   useLayoutEffect(() => {
@@ -147,18 +186,20 @@ export function Composer({ session, compact, files }: { session: SessionSummary;
         : '送信すると新しく始めます…'
       : running
         ? '実行中も追加の指示を送れます…'
-        : features?.commands && !isTouch
-          ? '指示を入力（/ でコマンド）…'
-          : '指示を入力…';
+        : isTouch
+          ? '指示を入力…'
+          : `指示を入力（${[features?.commands ? '/ でコマンド' : '', '@ でファイル', tags.length > 0 ? '# で候補' : ''].filter(Boolean).join('、')}）…`;
 
   return (
     <footer className="composer">
-      {menuOpen && (
-        <div className="slash-menu" role="listbox" aria-label="コマンド" ref={menuRef}>
-          {matches.length === 0 && <div className="slash-empty">{commands.loading ? 'コマンドを読み込み中…' : commands.error ?? '一致するコマンドはありません'}</div>}
-          {matches.map((c, i) => (
+      {menuOpen && trigger && (
+        <div className="slash-menu" role="listbox" aria-label={MENU_LABEL[trigger.kind]} ref={menuRef}>
+          {items.length === 0 && (
+            <div className="slash-empty">{source.loading ? `${MENU_LABEL[trigger.kind]}を読み込み中…` : (source.error ?? `一致する${MENU_LABEL[trigger.kind]}はありません`)}</div>
+          )}
+          {items.map((c, i) => (
             <button
-              key={c.name}
+              key={c.key}
               type="button"
               role="option"
               data-i={i}
@@ -170,11 +211,11 @@ export function Composer({ session, compact, files }: { session: SessionSummary;
               onMouseMove={() => {
                 if (sel !== i) setSel(i);
               }}
-              onClick={() => complete(c.name)}
+              onClick={() => complete(c)}
             >
-              <span className="slash-name">/{c.name}</span>
-              {c.argumentHint && <span className="slash-hint">{c.argumentHint}</span>}
-              {c.description && <span className="slash-desc ellipsis">{c.description}</span>}
+              <span className={trigger.kind === 'file' ? 'slash-name slash-path' : 'slash-name'}>{c.label}</span>
+              {c.hint && <span className="slash-hint">{c.hint}</span>}
+              {c.desc && <span className="slash-desc ellipsis">{c.desc}</span>}
             </button>
           ))}
         </div>
@@ -215,9 +256,13 @@ export function Composer({ session, compact, files }: { session: SessionSummary;
           placeholder={placeholder}
           disabled={archived}
           style={{ fontSize: isTouch ? 16 : 14 }}
-          aria-autocomplete={features?.commands ? 'list' : undefined}
-          aria-expanded={features?.commands ? menuOpen : undefined}
-          onChange={(e) => setText(e.target.value)}
+          aria-autocomplete="list"
+          aria-expanded={menuOpen}
+          onChange={(e) => {
+            setText(e.target.value);
+            setCaret(e.target.selectionStart ?? e.target.value.length);
+          }}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onPaste={(e) => {
             // スクリーンショットなどの画像・ファイルを貼り付けたら添付にする（文字だけなら普通に貼り付け）
             if (!canAttach) return;
@@ -228,18 +273,19 @@ export function Composer({ session, compact, files }: { session: SessionSummary;
           }}
           onKeyDown={(e) => {
             const composing = e.nativeEvent.isComposing;
-            if (menuOpen && matches.length > 0 && !composing) {
+            if (menuOpen && trigger && items.length > 0 && !composing) {
               if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                 e.preventDefault();
                 const d = e.key === 'ArrowDown' ? 1 : -1;
-                setSel((i) => (i + d + matches.length) % matches.length);
+                setSel((i) => (i + d + items.length) % items.length);
                 return;
               }
-              const picked = matches[Math.min(sel, matches.length - 1)];
-              // Tab は補完。Enter も補完するが、打ち終わった名前と同じなら、そのまま送信する
-              if ((e.key === 'Tab' && !e.shiftKey) || (e.key === 'Enter' && !e.shiftKey && picked.name !== query)) {
+              const picked = items[Math.min(sel, items.length - 1)];
+              // Tab は補完。Enter も補完するが、コマンドを打ち終わっていれば（名前が同じなら）、そのまま送信する
+              const typedCommand = trigger.kind === 'command' && picked.value === trigger.query;
+              if ((e.key === 'Tab' && !e.shiftKey) || (e.key === 'Enter' && !e.shiftKey && !typedCommand)) {
                 e.preventDefault();
-                complete(picked.name);
+                complete(picked);
                 return;
               }
             }

@@ -131,3 +131,35 @@ describe('スラッシュコマンド', () => {
     expect(r.json().agents.codex).toMatchObject({ attachments: false, commands: false });
   });
 });
+
+describe('@ の候補（作業フォルダのファイル）', () => {
+  const mentions = async (sid: string, q: string) =>
+    (await app.inject({ method: 'GET', url: `/api/sessions/${sid}/mentions?q=${encodeURIComponent(q)}`, headers: H })).json();
+
+  beforeEach(() => {
+    const a = path.join(dir, 'a');
+    fs.mkdirSync(path.join(a, 'src', 'lib'), { recursive: true });
+    fs.mkdirSync(path.join(a, 'node_modules', 'pkg'), { recursive: true });
+    fs.writeFileSync(path.join(a, 'README.md'), '');
+    fs.writeFileSync(path.join(a, 'src', 'main.ts'), '');
+    fs.writeFileSync(path.join(a, 'src', 'lib', 'store.ts'), '');
+    fs.writeFileSync(path.join(a, 'node_modules', 'pkg', 'store.js'), '');
+  });
+
+  it('空なら直下だけ（フォルダが先）。名前の前方一致を先に、node_modules は出さない', async () => {
+    expect(await mentions(claudeSid, '')).toEqual([
+      { path: 'src/', kind: 'dir' },
+      { path: 'README.md', kind: 'file' },
+    ]);
+    expect(await mentions(claudeSid, 'sto')).toEqual([{ path: 'src/lib/store.ts', kind: 'file' }]);
+    expect((await mentions(claudeSid, 's')).map((m: { path: string }) => m.path).slice(0, 2)).toEqual(['src/', 'src/lib/store.ts']);
+    expect(await mentions(claudeSid, 'src/li')).toEqual([
+      { path: 'src/lib/', kind: 'dir' },
+      { path: 'src/lib/store.ts', kind: 'file' },
+    ]);
+  });
+
+  it('AI によらず使える', async () => {
+    expect(await mentions(codexSid, '')).toEqual([]);
+  });
+});

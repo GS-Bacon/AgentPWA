@@ -75,17 +75,37 @@ export interface FolderEntry {
   defaultPermissionMode?: PermissionMode;
   /** プロジェクトの色（パレットの名前）。ペインの上部などを塗って見分けやすくする。省略時は色なし */
   color?: ProjectColor;
+  /** 入力欄で # を打ったときに出す候補（例: 案件の記号 J01）。省略時は候補なし */
+  tags?: ProjectTag[];
+}
+
+/** 入力欄の # の候補。選ぶと「#名前」が入力欄に入る */
+export interface ProjectTag {
+  /** # の後ろに入る名前（空白と # は使えない） */
+  name: string;
+  /** 候補の横に出す説明（任意） */
+  description?: string;
 }
 
 /** プロジェクトに付けられる色（パレット）。実際の色は Web の PROJECT_COLOR_HEX で決める */
 export type ProjectColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink' | 'gray';
 
-/** PATCH /api/projects の本文。path のプロジェクトの設定を変える（いまは色だけ。null で色を外す） */
+/** PATCH /api/projects の本文。path のプロジェクトの設定（色と # の候補）を変える。省いた項目は変えない */
 export interface UpdateProjectRequest {
   path: string;
   /** どの AI のプロジェクトか（同じフォルダを両方の AI で登録しているとき用。省くとそのフォルダの最初のプロジェクト） */
   agent?: AgentKind;
-  color: ProjectColor | null;
+  /** 色（null で外す） */
+  color?: ProjectColor | null;
+  /** # の候補（空の配列か null で外す）。この順のまま保存する */
+  tags?: ProjectTag[] | null;
+}
+
+/** GET /api/sessions/:id/mentions?q= の応答の1件（入力欄の @ の候補） */
+export interface MentionItem {
+  /** セッションの作業フォルダからの相対パス（区切りは /。フォルダは末尾に / を付ける） */
+  path: string;
+  kind: 'file' | 'dir';
 }
 
 export interface AgentInfo {

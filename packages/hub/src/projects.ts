@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type AgentKind } from '@agentpwa/shared';
-import type { CreateProjectRequest, DirListing, FolderEntry } from './api.ts';
-import { findAllowedFolder, PROJECT_COLORS, type HubConfig } from './config.ts';
+import type { CreateProjectRequest, DirListing, FolderEntry, ProjectTag } from './api.ts';
+import { findAllowedFolder, normalizeTags, PROJECT_COLORS, type HubConfig } from './config.ts';
 import { HttpError } from './sessions.ts';
 
 const execFileAsync = promisify(execFile);
@@ -233,8 +233,8 @@ async function doReorder(deps: ProjectDeps, projects: unknown): Promise<FolderEn
 }
 
 /**
- * プロジェクトの設定を変える（いまは色だけ）。設定ファイルの folders の該当項目に color を書く（null なら消す）。
- * ほかの項目は書かれたまま残す。
+ * プロジェクトの設定（色と # の候補）を変える。設定ファイルの folders の該当項目に color / tags を書く
+ * （null や空の配列なら消す。本文で省いた項目は変えない）。ほかの項目は書かれたまま残す。
  */
 export function updateProject(deps: ProjectDeps, body: unknown): Promise<FolderEntry> {
   const run = queue.then(() => doUpdate(deps, body));
@@ -244,13 +244,20 @@ export function updateProject(deps: ProjectDeps, body: unknown): Promise<FolderE
 
 async function doUpdate(deps: ProjectDeps, body: unknown): Promise<FolderEntry> {
   const { config } = deps;
-  const b = (body ?? {}) as { path?: unknown; agent?: unknown; color?: unknown };
+  const b = (body ?? {}) as { path?: unknown; agent?: unknown; color?: unknown; tags?: unknown };
   if (typeof b.path !== 'string' || !path.isAbsolute(b.path)) throw new HttpError(400, 'プロジェクトのフォルダを絶対パスで指定してください');
   if (b.agent !== undefined && !AGENTS.includes(b.agent as AgentKind)) throw new HttpError(400, 'agent が正しくありません');
-  if (b.color !== null && !PROJECT_COLORS.includes(b.color as never)) {
+  if (b.color === undefined && b.tags === undefined) throw new HttpError(400, '変える項目（color か tags）を指定してください');
+  if (b.color !== undefined && b.color !== null && !PROJECT_COLORS.includes(b.color as never)) {
     throw new HttpError(400, `色は ${PROJECT_COLORS.join(' / ')} のどれか（外すときは null）にしてください`);
   }
-  const color = b.color as FolderEntry['color'] | null;
+  const color = b.color as FolderEntry['color'] | null | undefined;
+  let tags: ProjectTag[] | undefined;
+  if (b.tags !== undefined) {
+    const t = b.tags === null ? [] : normalizeTags(b.tags);
+    if (typeof t === 'string') throw new HttpError(400, t);
+    tags = t;
+  }
   // agent を省いたときは、そのフォルダの最初のプロジェクト
   const folder = findAllowedFolder(config, b.path, b.agent as AgentKind | undefined);
   const index = folder ? config.folders.indexOf(folder) : -1;
@@ -261,12 +268,20 @@ async function doUpdate(deps: ProjectDeps, body: unknown): Promise<FolderEntry> 
   const items: unknown[] = Array.isArray(raw.folders) ? raw.folders : [];
   const item = items.find((it) => rawKey(it) === key) as Record<string, unknown> | undefined;
   if (!item) throw new HttpError(409, 'プロジェクトの一覧が変わっています。画面を読み直してから、もう一度変えてください');
-  if (color) item.color = color;
-  else delete item.color;
+  const { color: oldColor, tags: oldTags, ...rest } = config.folders[index];
+  const nextColor = color === undefined ? oldColor : (color ?? undefined);
+  const nextTags = tags === undefined ? oldTags : tags;
+  if (color !== undefined) {
+    if (color) item.color = color;
+    else delete item.color;
+  }
+  if (tags !== undefined) {
+    if (tags.length > 0) item.tags = tags;
+    else delete item.tags;
+  }
   await writeConfig(deps.configPath, raw);
   // 監視による読み直しを待たずに反映する
-  const { color: _old, ...rest } = config.folders[index];
-  const entry: FolderEntry = color ? { ...rest, color } : rest;
+  const entry: FolderEntry = { ...rest, ...(nextColor ? { color: nextColor } : {}), ...(nextTags?.length ? { tags: nextTags } : {}) };
   config.folders = config.folders.map((f, i) => (i === index ? entry : f));
   deps.onChanged();
   return entry;

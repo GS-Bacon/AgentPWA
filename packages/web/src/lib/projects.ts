@@ -4,7 +4,7 @@
 // 設定から外れたフォルダのセッションは、最後に「登録外」としてまとめる。
 // アーカイブしたセッションはプロジェクトに入れず、一覧の末尾の「アーカイブ済み」にまとめる（archivedSessions）。
 import type { AgentKind } from '@agentpwa/shared';
-import type { FolderEntry, HubInfo, ProjectColor, SessionSummary } from '@agentpwa/hub/api';
+import type { FolderEntry, HubInfo, ProjectColor, ProjectTag, SessionSummary } from '@agentpwa/hub/api';
 import { sortedSessions, useStore } from './store.ts';
 
 export interface Project {
@@ -81,6 +81,19 @@ export function folderOf(info: HubInfo | null, cwd: string, agent: AgentKind): F
 /** セッションのプロジェクトの色。色が無いか、登録外なら undefined */
 export function useProjectColor(s: { cwd: string; agent: AgentKind } | undefined): ProjectColor | undefined {
   return useStore((st) => (s ? folderOf(st.info, s.cwd, s.agent)?.color : undefined));
+}
+
+const NO_TAGS: ProjectTag[] = [];
+
+/**
+ * セッションの入力欄の # の候補。そのプロジェクトに無ければ、同じフォルダの別の AI のプロジェクトの候補を使う
+ * （どのプロジェクトでも両方の AI のセッションを作れるので）
+ */
+export function projectTags(info: HubInfo | null, s: { cwd: string; agent: AgentKind }): ProjectTag[] {
+  const own = folderOf(info, s.cwd, s.agent)?.tags;
+  if (own?.length) return own;
+  const other: AgentKind = s.agent === 'claude' ? 'codex' : 'claude';
+  return folderOf(info, s.cwd, other)?.tags ?? NO_TAGS;
 }
 
 /** このセッションのプロジェクトで「すべて自動」を選べるか（最終的な判定は Hub がする） */

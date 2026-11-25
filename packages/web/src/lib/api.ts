@@ -9,6 +9,7 @@ import type {
   FileInfo,
   FolderEntry,
   HubInfo,
+  MentionItem,
   ReorderProjectsRequest,
   SessionSummary,
   UpdateProjectRequest,
@@ -50,6 +51,7 @@ export const api = {
   fork: (id: string, messageId: string) => req<SessionSummary>('POST', `/api/sessions/${id}/fork`, { messageId }),
   /** 入力欄のスラッシュコマンドの補完（Hub が CLI に聞くので、初回は数秒かかる） */
   commands: (id: string) => req<SlashCommand[]>('GET', `/api/sessions/${id}/commands`),
+  mentions: (id: string, q: string) => req<MentionItem[]>('GET', `/api/sessions/${id}/mentions?q=${encodeURIComponent(q)}`),
   /** 名前の変更とアーカイブ・解除（アーカイブすると Hub が動いているセッションを止める） */
   update: (id: string, patch: UpdateSessionRequest) => req<SessionSummary>('PATCH', `/api/sessions/${id}`, patch),
   /** 1件ずつ削除する（元に戻せない） */

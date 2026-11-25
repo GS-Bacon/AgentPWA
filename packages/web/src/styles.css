@@ -334,6 +334,8 @@ kbd {
 }
 .slash-item.sel { background: var(--btn-bg); }
 .slash-name { font-family: var(--mono); color: var(--fg); flex: none; }
+/* @ のファイルのパス（長いものは末尾を省く） */
+.slash-path { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slash-hint { font-family: var(--mono); font-size: 12px; color: var(--fg-faint); flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slash-desc { color: var(--fg-muted); font-size: 12px; flex: 1 1 auto; }
 .slash-empty { padding: 6px 12px; font-size: 12px; color: var(--fg-muted); }

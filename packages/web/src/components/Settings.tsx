@@ -1,8 +1,8 @@
 // 設定（Hub の状態、認証、プロジェクト、表示）
 import { useState } from 'react';
 import { DEFAULT_PERMISSION_MODE, type AgentKind } from '@agentpwa/shared';
-import type { ProjectColor } from '@agentpwa/hub/api';
-import { askConfirm, changeAccess, moveProject, setProjectColor, useStore } from '../lib/store.ts';
+import type { FolderEntry, ProjectColor, ProjectTag } from '@agentpwa/hub/api';
+import { askConfirm, changeAccess, moveProject, setProjectColor, setProjectTags, useStore } from '../lib/store.ts';
 import { resetLayout } from '../lib/layout.ts';
 import { AGENT_COLOR, AGENT_LABEL, elapsed, MODE_LABEL, PROJECT_COLOR_HEX, PROJECT_COLOR_LABEL, PROJECT_COLORS } from '../lib/format.ts';
 import { UsageBars } from './common.tsx';
@@ -57,6 +57,81 @@ function ColorPalette({ name, value, onChange }: { name: string; value?: Project
           style={{ background: PROJECT_COLOR_HEX[c] }}
         />
       ))}
+    </span>
+  );
+}
+
+/** # の候補を1行1件（「名前 説明」）の文字にする */
+function tagsToText(tags: ProjectTag[] | undefined): string {
+  return (tags ?? []).map((t) => (t.description ? `${t.name} ${t.description}` : t.name)).join('\n');
+}
+
+/** 1行1件（「名前 説明」。名前の先頭の # は省いてよい）の文字を # の候補にする。空の行は飛ばす */
+function textToTags(text: string): ProjectTag[] {
+  const out: ProjectTag[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*[#＃]?(\S+)(?:\s+(.*\S))?\s*$/.exec(line);
+    if (!m) continue;
+    out.push(m[2] ? { name: m[1], description: m[2] } : { name: m[1] });
+  }
+  return out;
+}
+
+/**
+ * 入力欄の # の候補（設定ファイルの folders の tags）。1行1件で編集する。
+ * そのプロジェクトの AI も Hub の API で書き換えられる（driver-claude の hub-guide.ts）
+ */
+function TagsEditor({ folder }: { folder: FolderEntry }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const tags = folder.tags ?? [];
+  if (draft === null) {
+    return (
+      <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, marginTop: 8, fontSize: 12 }}>
+        <span className="muted"># の候補</span>
+        {tags.length === 0 ? (
+          <span className="muted">なし</span>
+        ) : (
+          <span className="mono ellipsis" style={{ minWidth: 0, flex: '0 1 auto' }} title={tags.map((t) => `#${t.name}`).join(' ')}>
+            {tags.slice(0, 8).map((t) => `#${t.name}`).join(' ')}
+            {tags.length > 8 ? ` ほか ${tags.length - 8} 件` : ''}
+          </span>
+        )}
+        <button className="btn btn-sm" onClick={() => setDraft(tagsToText(tags))}>
+          編集
+        </button>
+      </span>
+    );
+  }
+  const save = async () => {
+    setBusy(true);
+    const ok = await setProjectTags(folder, textToTags(draft));
+    setBusy(false);
+    if (ok) setDraft(null);
+  };
+  return (
+    <span style={{ display: 'block', marginTop: 8 }}>
+      <label className="muted" style={{ display: 'block', fontSize: 12, marginBottom: 4 }} htmlFor={`tags-${folder.agent}-${folder.path}`}>
+        # の候補（1行に1件。「名前 説明」の形で、説明は省けます）
+      </label>
+      <textarea
+        id={`tags-${folder.agent}-${folder.path}`}
+        className="textarea mono"
+        rows={Math.min(10, Math.max(3, draft.split('\n').length + 1))}
+        style={{ width: '100%', fontSize: 12, resize: 'vertical' }}
+        placeholder={'J01 案件の説明\nJ02'}
+        value={draft}
+        disabled={busy}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <span style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+        <button className="btn btn-primary btn-sm" disabled={busy} onClick={save}>
+          保存
+        </button>
+        <button className="btn btn-sm" disabled={busy} onClick={() => setDraft(null)}>
+          キャンセル
+        </button>
+      </span>
     </span>
   );
 }
@@ -188,6 +263,7 @@ export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
               {f.allowFullAuto ? <span style={{ color: 'var(--attention)' }}>「すべて自動」を許可</span> : '「すべて自動」は不可'}
             </span>
             <ColorPalette name={f.name} value={f.color} onChange={(c) => setProjectColor(f, c)} />
+            <TagsEditor folder={f} />
           </Row>
         ))}
         <p className="muted" style={{ padding: '10px 16px', fontSize: 12 }}>
@@ -199,7 +275,7 @@ export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
           ) : (
             '（未設定のため、いまは画面から作れません）'
           )}
-          。作ったプロジェクトは設定ファイルの folders に書き足されます。並び順は ↑↓（iPad / Web では一覧のプロジェクト名のドラッグでも）で変えられ、全端末で共有されます。色はパレットから選べます（ペインの上部と一覧が、その色で塗られます）。そのほかの変更・削除は、設定ファイルの folders を編集して保存します（Hub が自動で読み直します）。
+          。作ったプロジェクトは設定ファイルの folders に書き足されます。並び順は ↑↓（iPad / Web では一覧のプロジェクト名のドラッグでも）で変えられ、全端末で共有されます。色はパレットから選べます（ペインの上部と一覧が、その色で塗られます）。# の候補は、入力欄で # を打ったときに出ます（そのプロジェクトの AI に頼んで書き換えてもらうこともできます）。そのほかの変更・削除は、設定ファイルの folders を編集して保存します（Hub が自動で読み直します）。
         </p>
       </Section>
       <Section title="表示">

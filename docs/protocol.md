@@ -180,7 +180,7 @@ Codex 担当で、次を対応してください（プロトコル v5。3章6を
 
 Codex 担当で、できるものから対応してください（3.3 を参照。どちらも任意で、対応するまで Web は添付ボタンと補完を出しません）。
 - 添付ファイル: app-server が画像（やファイル）の入力を受け付けるなら、`send` の `attachments` を渡し、`supportsAttachments: true` にする。ユーザーの発言の `message` イベントに `attachments`（中身なし）を付ける
-- スラッシュコマンド: 使えるコマンドの一覧が app-server から取れるなら `listCommands(cwd)` を実装する
+- スラッシュコマンド: 使えるコマンドの一覧が app-server から取れるなら `listCommands(cwd)` を実装する。ユーザーから「Codex のセッションでも `/` の補完を出したい」と要望がありました（2026-11-25）。スキルやカスタムプロンプトの一覧（例: app-server の skills の一覧のメソッド、`~/.codex/prompts`）を `SlashCommand` にして返してください。実装すれば Web 側はそのまま補完を出します（`@` のファイルと `#` のプロジェクトの候補は Hub と Web だけで動くので、Codex 側の対応は要りません）
 - 権限モードの既定が `DEFAULT_PERMISSION_MODE`（`auto`）になりました。`auto` に当たる設定が無ければ、3章5のとおり `ask` に落としてください
 
 ### Codex への依頼（質問の選択肢、v8）

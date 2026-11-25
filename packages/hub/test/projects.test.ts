@@ -214,7 +214,7 @@ describe('プロジェクトの色', () => {
   it('知らない色や未登録のプロジェクトは断る', async () => {
     const a = path.join(root, 'alpha');
     await expect(updateProject(deps(), { path: a, color: '#ff0000' })).rejects.toThrow('色は');
-    await expect(updateProject(deps(), { path: a })).rejects.toThrow('色は');
+    await expect(updateProject(deps(), { path: a })).rejects.toThrow('color か tags');
     await expect(updateProject(deps(), { path: path.join(root, 'beta'), color: 'red' })).rejects.toThrow('登録されていない');
     await expect(updateProject(deps(), { path: 'rel', color: 'red' })).rejects.toThrow('絶対パス');
   });
@@ -222,6 +222,48 @@ describe('プロジェクトの色', () => {
   it('設定ファイルの color が不正なら読み込みで断る', () => {
     fs.writeFileSync(configPath, JSON.stringify({ folders: [{ path: path.join(root, 'alpha'), color: 'navy' }] }));
     expect(() => loadConfig(configPath)).toThrow('color');
+  });
+});
+
+describe('プロジェクトの # の候補', () => {
+  it('設定ファイルに tags を書き、色は残す。空の配列で消す', async () => {
+    const a = path.join(root, 'alpha');
+    await updateProject(deps(), { path: a, color: 'teal' });
+    const e = await updateProject(deps(), {
+      path: a,
+      agent: 'claude',
+      tags: [{ name: '#J01', description: ' 一つ目 ' }, 'J02', { name: 'j01' }, { name: 'J03', description: '' }, { name: '＃Ｊ０４' }],
+    });
+    // 先頭の # と説明の前後の空白を除き、全角は半角にし、大文字小文字だけ違う重なりは後を捨てる。文字列だけの項目も受ける
+    expect(e.tags).toEqual([{ name: 'J01', description: '一つ目' }, { name: 'J02' }, { name: 'J03' }, { name: 'J04' }]);
+    expect(e.color).toBe('teal');
+    expect(config.folders[0].tags).toEqual(e.tags);
+    let raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(raw.folders).toEqual([{ path: a, color: 'teal', tags: e.tags }]);
+    expect(loadConfig(configPath).config.folders[0].tags).toEqual(e.tags);
+
+    // 色だけ変えても tags は残る
+    const e2 = await updateProject(deps(), { path: a, color: null });
+    expect(e2.tags).toEqual(e.tags);
+
+    await updateProject(deps(), { path: a, tags: [] });
+    expect(config.folders[0].tags).toBeUndefined();
+    raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(raw.folders).toEqual([{ path: a }]);
+  });
+
+  it('空白や # を含む名前、配列でないものは断る', async () => {
+    const a = path.join(root, 'alpha');
+    await expect(updateProject(deps(), { path: a, tags: [{ name: 'J 01' }] })).rejects.toThrow('name');
+    await expect(updateProject(deps(), { path: a, tags: [{ name: '' }] })).rejects.toThrow('name');
+    await expect(updateProject(deps(), { path: a, tags: [{ name: 'a#b' }] })).rejects.toThrow('name');
+    await expect(updateProject(deps(), { path: a, tags: 'J01' })).rejects.toThrow('配列');
+    await expect(updateProject(deps(), { path: a, tags: [{ name: 'J01', description: 1 }] })).rejects.toThrow('description');
+  });
+
+  it('設定ファイルの tags が不正なら読み込みで断る', () => {
+    fs.writeFileSync(configPath, JSON.stringify({ folders: [{ path: path.join(root, 'alpha'), tags: [{ name: 'a b' }] }] }));
+    expect(() => loadConfig(configPath)).toThrow('tags');
   });
 });
 

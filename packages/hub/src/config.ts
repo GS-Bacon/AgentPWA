@@ -4,10 +4,43 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type AgentKind, type PermissionMode } from '@agentpwa/shared';
-import type { FolderEntry, ProjectColor } from './api.ts';
+import type { FolderEntry, ProjectColor, ProjectTag } from './api.ts';
 
 /** プロジェクトに付けられる色（api.ts の ProjectColor と同じ並び） */
 export const PROJECT_COLORS: readonly ProjectColor[] = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'gray'];
+
+/** # の候補の数と長さの上限 */
+export const MAX_TAGS = 500;
+const MAX_TAG_NAME = 64;
+const MAX_TAG_DESCRIPTION = 200;
+
+/**
+ * # の候補を確かめて、そろえた形（名前は全角を半角にして前後の空白と先頭の # を除き、空の説明は省く）にする。
+ * 誤りがあれば、その説明の文字列を返す。名前が重なったら後のものを捨てる。
+ */
+export function normalizeTags(value: unknown): ProjectTag[] | string {
+  if (!Array.isArray(value)) return 'tags は { name, description? } の配列にしてください';
+  if (value.length > MAX_TAGS) return `tags は ${MAX_TAGS} 件までにしてください`;
+  const out: ProjectTag[] = [];
+  const seen = new Set<string>();
+  for (const v of value) {
+    const t = (typeof v === 'string' ? { name: v } : v) as { name?: unknown; description?: unknown } | null;
+    if (typeof t?.name !== 'string') return `tags の name は文字列にしてください: ${JSON.stringify(v)}`;
+    // 日本語入力で打った全角の英数字（Ｊ０１）は半角にそろえる
+    const name = t.name.normalize('NFKC').trim().replace(/^#+/, '');
+    if (!name || /[\s#＃]/.test(name) || name.length > MAX_TAG_NAME) {
+      return `tags の name は空白と # を含まない ${MAX_TAG_NAME} 文字までの文字列にしてください: ${JSON.stringify(t.name)}`;
+    }
+    if (t.description !== undefined && t.description !== null && typeof t.description !== 'string') {
+      return `tags の description は文字列にしてください: ${name}`;
+    }
+    const description = typeof t.description === 'string' ? t.description.trim().slice(0, MAX_TAG_DESCRIPTION) : '';
+    if (seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push(description ? { name, description } : { name });
+  }
+  return out;
+}
 
 export interface HubConfig {
   /** 待ち受けポート（127.0.0.1 固定） */
@@ -82,6 +115,11 @@ function validate(c: HubConfig, file: string): HubConfig {
     if (f.color !== undefined && !PROJECT_COLORS.includes(f.color)) {
       errors.push(`folders の color は ${PROJECT_COLORS.map((c) => `'${c}'`).join(' / ')} のどれかにしてください: ${label}`);
     }
+    if (f.tags !== undefined) {
+      const tags = normalizeTags(f.tags);
+      if (typeof tags === 'string') errors.push(`folders の ${tags}: ${label}`);
+      else f.tags = tags;
+    }
     if (f.defaultPermissionMode === 'full_auto' && f.allowFullAuto !== true) {
       errors.push(`defaultPermissionMode を 'full_auto' にするには allowFullAuto: true が必要です: ${label}`);
     }
@@ -102,6 +140,7 @@ function validate(c: HubConfig, file: string): HubConfig {
     allowFullAuto: f.allowFullAuto === true,
     defaultPermissionMode: f.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE,
     ...(f.color ? { color: f.color } : {}),
+    ...(f.tags?.length ? { tags: f.tags } : {}),
   }));
   c.projectRoots = c.projectRoots.map((r) => path.resolve(r));
   return c;

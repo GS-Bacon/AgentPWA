@@ -47,13 +47,8 @@ export function useCommands(sessionId: string, enabled: boolean): { list: SlashC
     if (enabled) load(sessionId);
   }, [sessionId, enabled]);
   const e = cache.get(sessionId);
-  return { list: e?.list ?? [], loading: !!e?.promise && !e.list, error: e?.list ? undefined : e?.error };
-}
-
-/** 入力中の「/名前」の部分（先頭が / で、まだ空白を打っていないとき）。それ以外は null */
-export function slashQuery(text: string): string | null {
-  const m = /^\/([^\s/]*)$/.exec(text);
-  return m ? m[1] : null;
+  // 取りに行く前の最初の描画でも「読み込み中」を出す（一覧が届くまで何も出ないと、補完が無いように見えるので）
+  return { list: e?.list ?? [], loading: enabled && !e?.list && !e?.error, error: e?.list ? undefined : e?.error };
 }
 
 /** 名前の前方一致を先に、そのあと名前・説明の部分一致を並べる */

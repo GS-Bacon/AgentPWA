@@ -5,11 +5,12 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { EFFORT_LEVELS, PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type Attachment, type EffortLevel, type PermissionMode, type SessionEvent, type SlashCommand, type UserAction } from '@agentpwa/shared';
-import type { CreateProjectRequest, ReorderProjectsRequest, CreateSessionRequest, FileInfo, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
+import type { CreateProjectRequest, ReorderProjectsRequest, CreateSessionRequest, FileInfo, HubInfo, MentionItem, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { AccessRequests, accessInfo, allowUser, deniedPage, dismissUser, revokeUser, type AccessDeps } from './access.ts';
 import { checkOrigin, checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
 import { extraViewerRoots, fileHeaders, resolveProjectFile, toInfo } from './files.ts';
+import { filterMentions, listMentions } from './mentions.ts';
 import { createProject, listDirs, reorderProjects, updateProject, type ProjectDeps } from './projects.ts';
 import { HttpError, type SessionManager } from './sessions.ts';
 
@@ -262,6 +263,11 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   });
   // 入力欄のスラッシュコマンドの補完
   app.get<{ Params: { id: string } }>('/api/sessions/:id/commands', async (req): Promise<SlashCommand[]> => manager.commands(req.params.id));
+  // 入力欄の @ の候補（作業フォルダの下のファイルとフォルダ）
+  app.get<{ Params: { id: string }; Querystring: { q?: string } }>('/api/sessions/:id/mentions', async (req): Promise<MentionItem[]> => {
+    const s = manager.get(req.params.id);
+    return filterMentions(await listMentions(s.cwd), String(req.query.q ?? ''));
+  });
 
   // ファイルビュワー（docs/architecture.md の 5.1、6.7）。プロジェクトのフォルダと、Google ドライブなど追加のフォルダの下のファイルだけ
   app.get<{ Params: { id: string }; Querystring: { path?: string } }>('/api/sessions/:id/file-info', async (req): Promise<FileInfo> => {

@@ -2,7 +2,7 @@
 // useSyncExternalStore で購読する小さなストア。
 import { useSyncExternalStore } from 'react';
 import type { AgentKind, SessionEvent } from '@agentpwa/shared';
-import type { HubInfo, ProjectColor, ServerMessage, SessionSummary, UsageInfo } from '@agentpwa/hub/api';
+import type { HubInfo, ProjectColor, ProjectTag, ServerMessage, SessionSummary, UsageInfo } from '@agentpwa/hub/api';
 import { api } from './api.ts';
 
 export interface State {
@@ -359,6 +359,20 @@ export async function setProjectColor(project: { path: string; agent: AgentKind 
   } catch (e) {
     if (state.info?.folders === folders) set({ info: { ...state.info, folders: info.folders } });
     showToast((e as Error).message);
+  }
+}
+
+/** プロジェクトの入力欄の # の候補を置き換える（空で外す）。全端末で共有する。成功したら true */
+export async function setProjectTags(project: { path: string; agent: AgentKind }, tags: ProjectTag[]): Promise<boolean> {
+  const { path, agent } = project;
+  try {
+    const entry = await api.updateProject({ path, agent, tags });
+    const info = state.info;
+    if (info) set({ info: { ...info, folders: info.folders.map((f) => (f.path === path && f.agent === agent ? entry : f)) } });
+    return true;
+  } catch (e) {
+    showToast((e as Error).message);
+    return false;
   }
 }
 
