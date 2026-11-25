@@ -272,6 +272,21 @@ async function doUpdate(deps: ProjectDeps, body: unknown): Promise<FolderEntry> 
   return entry;
 }
 
+/**
+ * 設定ファイルを読んで fn で書き換え、fn が true を返したときだけ保存する（ほかの書き込みと1件ずつ順に行う）。
+ * 書かれた項目はそのまま残し、既定値を書き足さない。
+ */
+export function editConfig(configPath: string, fn: (raw: Record<string, unknown>) => boolean): Promise<boolean> {
+  const run = queue.then(async () => {
+    const raw = JSON.parse(await fs.promises.readFile(configPath, 'utf8')) as Record<string, unknown>;
+    if (!fn(raw)) return false;
+    await writeConfig(configPath, raw);
+    return true;
+  });
+  queue = run.catch(() => undefined);
+  return run;
+}
+
 /** 設定ファイルを書き換える。一時ファイルに書いてから置き換える */
 async function writeConfig(configPath: string, raw: Record<string, unknown>): Promise<void> {
   const tmp = `${configPath}.${process.pid}.tmp`;

@@ -225,9 +225,14 @@ function onMessage(m: ServerMessage): void {
     case 'usage':
       set((s) => ({ usage: { ...s.usage, [m.agent]: m.usage } }));
       break;
-    case 'info':
+    case 'info': {
+      // 許可待ちのユーザーが増えたら知らせる（許可は設定タブの「アクセス」から）
+      const before = new Set(state.info?.access?.pending.map((p) => p.login.toLowerCase()) ?? []);
+      const added = m.info.access?.pending.find((p) => !before.has(p.login.toLowerCase()));
       set({ info: m.info });
+      if (added) showInfo(`${added.login} がアクセスを求めています（設定 → アクセス で許可できます）`);
       break;
+    }
   }
 }
 
@@ -355,6 +360,13 @@ export async function setProjectColor(project: { path: string; agent: AgentKind 
     if (state.info?.folders === folders) set({ info: { ...state.info, folders: info.folders } });
     showToast((e as Error).message);
   }
+}
+
+/** アクセスの許可・取り消し・許可待ちから外す。Hub の応答（新しい一覧）をすぐ画面に反映する */
+export async function changeAccess(kind: 'allow' | 'revoke' | 'dismiss', login: string): Promise<void> {
+  const call = kind === 'allow' ? api.allowUser : kind === 'revoke' ? api.revokeUser : api.dismissUser;
+  const access = await run(() => call(login));
+  if (access && state.info) set({ info: { ...state.info, access } });
 }
 
 /** 操作を実行し、失敗したら通知を出す。 */

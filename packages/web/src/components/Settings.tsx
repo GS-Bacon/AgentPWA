@@ -2,9 +2,9 @@
 import { useState } from 'react';
 import { DEFAULT_PERMISSION_MODE, type AgentKind } from '@agentpwa/shared';
 import type { ProjectColor } from '@agentpwa/hub/api';
-import { moveProject, setProjectColor, useStore } from '../lib/store.ts';
+import { askConfirm, changeAccess, moveProject, setProjectColor, useStore } from '../lib/store.ts';
 import { resetLayout } from '../lib/layout.ts';
-import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL, PROJECT_COLOR_HEX, PROJECT_COLOR_LABEL, PROJECT_COLORS } from '../lib/format.ts';
+import { AGENT_COLOR, AGENT_LABEL, elapsed, MODE_LABEL, PROJECT_COLOR_HEX, PROJECT_COLOR_LABEL, PROJECT_COLORS } from '../lib/format.ts';
 import { UsageBars } from './common.tsx';
 import { AgentIcon, IconPlus } from './Icons.tsx';
 import { NewProjectForm } from './NewProject.tsx';
@@ -61,6 +61,70 @@ function ColorPalette({ name, value, onChange }: { name: string; value?: Project
   );
 }
 
+/**
+ * アクセスの許可（設定ファイルの allowedUsers）。
+ * 許可されていない Tailscale ユーザーが開こうとすると「許可待ち」に出るので、ここで許可する。
+ */
+function AccessSection() {
+  const info = useStore((s) => s.info);
+  const access = info?.access;
+  if (!access) return null;
+  const isSelf = (u: string) => !!info?.user && info.user.toLowerCase() === u.toLowerCase();
+  const revoke = async (login: string) => {
+    const ok = await askConfirm({
+      title: 'アクセスの許可を取り消しますか？',
+      body: [`${login} は、この Hub を開けなくなります。`],
+      confirmLabel: '取り消す',
+      danger: true,
+    });
+    if (ok) await changeAccess('revoke', login);
+  };
+  return (
+    <Section title="アクセス">
+      {access.pending.map((p) => (
+        <Row key={p.login} label="許可待ち">
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ minWidth: 0 }}>
+              <span className="mono" style={{ fontSize: 13 }}>{p.login}</span>
+              <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+                {p.name ? `${p.name} · ` : ''}
+                {elapsed(p.lastSeen)}前に開こうとしました
+              </span>
+            </span>
+            <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+              <button className="btn btn-sm btn-primary" onClick={() => void changeAccess('allow', p.login)}>
+                許可
+              </button>
+              <button className="btn btn-sm" onClick={() => void changeAccess('dismiss', p.login)}>
+                無視
+              </button>
+            </span>
+          </span>
+        </Row>
+      ))}
+      {access.allowedUsers.map((u) => (
+        <Row key={u} label="許可済み">
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="mono" style={{ fontSize: 13, minWidth: 0 }}>
+              {u}
+              {isSelf(u) && <span className="muted">（この端末）</span>}
+            </span>
+            {!isSelf(u) && (
+              <button className="btn btn-sm btn-danger" style={{ marginLeft: 'auto' }} onClick={() => void revoke(u)}>
+                取り消す
+              </button>
+            )}
+          </span>
+        </Row>
+      ))}
+      <p className="muted" style={{ padding: '10px 16px', fontSize: 12 }}>
+        {access.allowedUsers.length === 0 ? 'まだ誰も許可されていません。' : ''}
+        tailscale serve 経由で開けるのは、ここで許可した Tailscale ユーザーだけです。許可されていないユーザーが開こうとすると「許可待ち」に出ます（Hub を再起動すると消えます）。許可したユーザーは、この Hub を通じてこのPCで AI を動かせます。このPCのブラウザ（127.0.0.1）からは、許可なしで開けます。
+      </p>
+    </Section>
+  );
+}
+
 /** fullscreen: iPhone では「新しいプロジェクト」を全画面で開く */
 export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
   const info = useStore((s) => s.info);
@@ -77,6 +141,7 @@ export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
           <span className="mono" style={{ fontSize: 12 }}>{info?.configPath ?? '—'}</span>
         </Row>
       </Section>
+      <AccessSection />
       <Section title="エージェント">
         {(['claude', 'codex'] as AgentKind[]).map((a) => {
           const ag = info?.agents[a];

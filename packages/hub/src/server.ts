@@ -6,6 +6,7 @@ import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { EFFORT_LEVELS, PERMISSION_MODES, PROTOCOL_VERSION, type AgentKind, type Attachment, type EffortLevel, type PermissionMode, type SessionEvent, type SlashCommand, type UserAction } from '@agentpwa/shared';
 import type { CreateProjectRequest, ReorderProjectsRequest, CreateSessionRequest, FileInfo, HubInfo, ServerMessage, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
+import { AccessRequests, accessInfo, allowUser, deniedPage, dismissUser, revokeUser, type AccessDeps } from './access.ts';
 import { checkOrigin, checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
 import { extraViewerRoots, fileHeaders, resolveProjectFile, toInfo } from './files.ts';
@@ -26,7 +27,13 @@ export interface ServerOptions {
   webDist?: string;
   /** 'fake' にした agent */
   fakeAgents: AgentKind[];
+  /** 許可待ちのユーザー（省略時は新しく作る） */
+  accessRequests?: AccessRequests;
   logger?: boolean;
+}
+
+function header(v: string | string[] | undefined): string | undefined {
+  return (Array.isArray(v) ? v[0] : v) || undefined;
 }
 
 const AGENTS: AgentKind[] = ['claude', 'codex'];
@@ -105,11 +112,28 @@ function parseAction(body: unknown): UserAction {
 export async function buildServer(opts: ServerOptions): Promise<FastifyInstance> {
   const { manager, config } = opts;
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 1_000_000 });
+  const accessDeps: AccessDeps = {
+    config,
+    configPath: opts.configPath,
+    requests: opts.accessRequests ?? new AccessRequests(),
+    onChanged: () => manager.notifyConfigChanged(),
+  };
 
   // すべてのリクエスト（静的ファイルと WebSocket を含む）で利用者を確認する
   app.addHook('onRequest', async (req, reply) => {
     const r = checkRequest(req.headers, config);
     if (!r.ok) {
+      // 許可されていない Tailscale ユーザーは「許可待ち」として覚え、許可された端末の設定タブに出す
+      const login = header(req.headers['tailscale-user-login']);
+      if (r.status === 403 && login && accessDeps.requests.record(login, header(req.headers['tailscale-user-name']))) {
+        console.log(`[hub] 許可されていないユーザーからのアクセス: ${login}（設定 → アクセス で許可できます）`);
+        accessDeps.onChanged();
+      }
+      // ブラウザで直接開いたとき（PWA を入れる前など）は、理由と次にやることを書いたページを見せる
+      if (req.method === 'GET' && String(req.headers.accept ?? '').includes('text/html')) {
+        reply.code(r.status).type('text/html; charset=utf-8').header('cache-control', 'no-store').send(deniedPage(r.status, r.reason, login));
+        return reply;
+      }
       reply.code(r.status).type('text/plain; charset=utf-8').send(r.reason);
       return reply;
     }
@@ -147,6 +171,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       configPath: opts.configPath,
       protocolVersion: PROTOCOL_VERSION,
       projectRoots: config.projectRoots,
+      access: accessInfo(accessDeps),
     };
   }
 
@@ -169,6 +194,11 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   app.put('/api/projects/order', async (req) => reorderProjects(projectDeps, (req.body as Partial<ReorderProjectsRequest> | undefined)?.projects));
   // プロジェクトの設定の変更（いまは色だけ。UpdateProjectRequest）
   app.patch('/api/projects', async (req) => updateProject(projectDeps, req.body));
+
+  // アクセスの許可（設定ファイルの allowedUsers）。許可待ちは、許可されていないユーザーが開こうとしたときに覚える
+  app.post('/api/access/allow', async (req) => allowUser(accessDeps, req.body));
+  app.post('/api/access/revoke', async (req) => revokeUser(accessDeps, req.body, req.tailscaleUser));
+  app.post('/api/access/dismiss', async (req) => dismissUser(accessDeps, req.body));
 
   app.post('/api/sessions', async (req) => {
     const b = (req.body ?? {}) as Partial<CreateSessionRequest>;

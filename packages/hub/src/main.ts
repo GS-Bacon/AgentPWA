@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentDriver, AgentKind } from '@agentpwa/shared';
 import { createClaudeDriver } from '@agentpwa/driver-claude';
+import { autoFillConfig } from './autoconfig.ts';
 import { loadConfig, watchConfig } from './config.ts';
 import { Store } from './db.ts';
 import { createFakeDriver } from './fake-driver.ts';
@@ -28,10 +29,20 @@ async function loadCodexDriver(mode: 'fake' | 'driver'): Promise<{ driver: Agent
 }
 
 async function main(): Promise<void> {
-  const { config, path: configPath, created } = loadConfig();
-  if (created) console.log(`[hub] 設定ファイルを作りました: ${configPath}`);
-  if (config.folders.length === 0) console.warn(`[hub] 起動できるフォルダがありません。${configPath} の folders に追加してください`);
-  if (config.allowedUsers.length === 0) console.warn('[hub] allowedUsers が空です。tailscale serve 経由のアクセスはすべて拒否されます');
+  const first = loadConfig();
+  const configPath = first.path;
+  if (first.created) console.log(`[hub] 設定ファイルを作りました: ${configPath}`);
+  // 空の項目を分かる範囲で埋める（Tailscale のユーザー、ホームフォルダ）。失敗しても起動は続ける
+  const filled = await autoFillConfig(configPath, { created: first.created }).catch((e: Error) => {
+    console.warn(`[hub] 設定の自動設定に失敗しました: ${e.message}`);
+    return { changes: [] };
+  });
+  for (const c of filled.changes) console.log(`[hub] 自動設定: ${c}`);
+  const { config } = filled.changes.length > 0 ? loadConfig(configPath) : first;
+  if (config.folders.length === 0) console.log('[hub] プロジェクトはまだありません。画面の「新しいプロジェクト」から作れます');
+  if (config.allowedUsers.length === 0) {
+    console.warn('[hub] allowedUsers が空です。tailscale serve 経由で開こうとした人は、このPCのブラウザの「設定 → アクセス」から許可できます');
+  }
 
   fs.mkdirSync(config.dataDir, { recursive: true });
   const store = new Store(path.join(config.dataDir, 'hub.db'));

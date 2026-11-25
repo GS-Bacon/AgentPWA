@@ -1,11 +1,13 @@
 {
   "name": "agentpwa",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
+    "setup": "npm install && tsx packages/hub/src/setup.ts",
     "dev": "concurrently -k -n hub,web -c yellow,cyan \"npm:dev -w @agentpwa/hub\" \"npm:dev -w @agentpwa/web\"",
     "build": "npm run build -w @agentpwa/web",
     "start": "npm run build && npm run start -w @agentpwa/hub",
@@ -20,6 +22,6 @@
     "vitest": "^3.0.0"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   }
 }

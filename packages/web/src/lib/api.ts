@@ -1,6 +1,7 @@
 // Hub の REST API
 import type { SessionEvent, SlashCommand, UserAction } from '@agentpwa/shared';
 import type {
+  AccessInfo,
   CreateProjectRequest,
   CreateSessionRequest,
   DeleteSessionResult,
@@ -61,6 +62,12 @@ export const api = {
   reorderProjects: (body: ReorderProjectsRequest) => req<FolderEntry[]>('PUT', '/api/projects/order', body),
   /** プロジェクトの設定（いまは色だけ）を変える */
   updateProject: (body: UpdateProjectRequest) => req<FolderEntry>('PATCH', '/api/projects', body),
+  /** Tailscale ユーザーを許可する（設定ファイルの allowedUsers に書き足す） */
+  allowUser: (login: string) => req<AccessInfo>('POST', '/api/access/allow', { login }),
+  /** 許可を取り消す（自分自身は取り消せない） */
+  revokeUser: (login: string) => req<AccessInfo>('POST', '/api/access/revoke', { login }),
+  /** 許可待ちの一覧から消す */
+  dismissUser: (login: string) => req<AccessInfo>('POST', '/api/access/dismiss', { login }),
   /** ファイルビュワー: プロジェクトのフォルダの下のファイルの情報（path は相対パスか絶対パス） */
   fileInfo: (id: string, path: string) => req<FileInfo>('GET', `/api/sessions/${id}/file-info?path=${encodeURIComponent(path)}`),
 };

@@ -113,6 +113,30 @@ export interface HubInfo {
   protocolVersion: number;
   /** 画面からプロジェクトを作ってよいルートフォルダ（設定ファイルの projectRoots）。空なら作れない */
   projectRoots: string[];
+  /** アクセスの許可（設定タブの「アクセス」） */
+  access: AccessInfo;
+}
+
+/** 許可されていないのに開こうとした Tailscale ユーザー（Hub のメモリだけに覚える） */
+export interface PendingUser {
+  /** Tailscale-User-Login */
+  login: string;
+  /** Tailscale-User-Name（表示名） */
+  name?: string;
+  /** 最後に開こうとした時刻 */
+  lastSeen: string;
+}
+
+export interface AccessInfo {
+  /** 許可している Tailscale ユーザー（設定ファイルの allowedUsers） */
+  allowedUsers: string[];
+  /** 許可待ち（新しい順） */
+  pending: PendingUser[];
+}
+
+/** POST /api/access/allow・/api/access/revoke・/api/access/dismiss の本文。応答は AccessInfo */
+export interface AccessRequest {
+  login: string;
 }
 
 /** ファイルビュワーでの表示のしかた（docs/architecture.md の 5.1） */
