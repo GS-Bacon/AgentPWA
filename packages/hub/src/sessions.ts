@@ -540,6 +540,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         this.record(id, { type: 'error', message: '「すべて自動」はこのプロジェクトで許可されていないため、「毎回確認」で起動します', fatal: false });
         this.record(id, { type: 'permission_mode', mode: permissionMode });
       }
+      // 起動中に Driver が致命的なエラーを伝えていれば、同じ失敗をもう一度記録しない
+      let fatalReported = false;
       try {
         const session = await driver.start(
           {
@@ -551,12 +553,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             initialPrompt,
             resumeToken: rec.resumeToken,
           },
-          (ev) => this.onDriverEvent(id, ev),
+          (ev) => {
+            if (ev.type === 'error' && ev.fatal) fatalReported = true;
+            this.onDriverEvent(id, ev);
+          },
         );
         this.live.set(id, session);
         return session;
       } catch (e) {
-        this.record(id, { type: 'error', message: `起動できませんでした: ${(e as Error).message}`, fatal: true });
+        if (!fatalReported) this.record(id, { type: 'error', message: `起動できませんでした: ${(e as Error).message}`, fatal: true });
         this.record(id, { type: 'status', status: 'error' });
         throw new HttpError(500, (e as Error).message);
       }

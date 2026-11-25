@@ -19,6 +19,8 @@ class TestDriver implements AgentDriver {
   stops = 0;
   deleted: { cwd: string; resumeToken: string }[] = [];
   deleteError: Error | null = null;
+  /** 起動を失敗させる（reportFatal なら Driver 自身も致命的なエラーを出す） */
+  startError: { message: string; reportFatal: boolean } | null = null;
   emit: (e: DriverEvent) => void = () => {};
   async deleteHistory(target: { cwd: string; resumeToken: string }) {
     this.deleted.push(target);
@@ -33,6 +35,13 @@ class TestDriver implements AgentDriver {
     this.emit = emit;
     this.lastModel = { model: opts.model, effort: opts.effort };
     emit({ type: 'status', status: 'starting' });
+    if (this.startError) {
+      if (this.startError.reportFatal) {
+        emit({ type: 'error', message: this.startError.message, fatal: true });
+        emit({ type: 'status', status: 'error' });
+      }
+      throw new Error(this.startError.message);
+    }
     emit({ type: 'resume_token', token: opts.resumeToken ?? `token-${opts.sessionId}` });
     emit({ type: 'permission_mode', mode: opts.permissionMode });
     emit({ type: 'status', status: opts.initialPrompt ? 'running' : 'idle' });
@@ -199,6 +208,27 @@ describe('SessionManager', () => {
     expect(second.driver.actions).toContainEqual({ type: 'send', text: '続けて' });
     expect(second.manager.get(s.id).live).toBe(true);
     second.store.close();
+  });
+
+  it('再開に失敗したとき、Driver が伝えたエラーは二重に記録せず、伝えなかったときは Hub が記録する', async () => {
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ agent: 'claude', cwd: config.folders[0].path, permissionMode: 'ask', prompt: 'hi' });
+    await manager.stop(s.id);
+    const errorsAfter = (seq: number) => manager.events(s.id, seq).filter((e) => e.type === 'error');
+
+    driver.startError = { message: 'スレッドは別のプロセスで開かれています', reportFatal: true };
+    let seq = manager.get(s.id).lastSeq;
+    await expect(manager.action(s.id, { type: 'send', text: '続けて' })).rejects.toThrow();
+    expect(errorsAfter(seq)).toHaveLength(1);
+    expect(manager.get(s.id).status).toBe('error');
+    expect(manager.get(s.id).lastError).toBe('スレッドは別のプロセスで開かれています');
+
+    driver.startError = { message: '起動に失敗', reportFatal: false };
+    seq = manager.get(s.id).lastSeq;
+    await expect(manager.action(s.id, { type: 'send', text: 'もう一度' })).rejects.toThrow();
+    expect(errorsAfter(seq).map((e) => e.type === 'error' && e.message)).toEqual(['起動できませんでした: 起動に失敗']);
+    expect(manager.get(s.id).status).toBe('error');
+    store.close();
   });
 
   it('動いていないセッションへの許可操作はエラー', async () => {
