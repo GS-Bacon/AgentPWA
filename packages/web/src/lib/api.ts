@@ -12,6 +12,7 @@ import type {
   MentionItem,
   ReorderProjectsRequest,
   SessionSummary,
+  UpdateAgentDefaultsRequest,
   UpdateProjectRequest,
   UpdateSessionRequest,
 } from '@agentpwa/hub/api';
@@ -64,6 +65,8 @@ export const api = {
   reorderProjects: (body: ReorderProjectsRequest) => req<FolderEntry[]>('PUT', '/api/projects/order', body),
   /** プロジェクトの設定（いまは色だけ）を変える */
   updateProject: (body: UpdateProjectRequest) => req<FolderEntry>('PATCH', '/api/projects', body),
+  /** AI ごとの既定のモデルとエフォートを変える（Hub が設定ファイルの agentDefaults に書く）。応答は両方の AI の既定 */
+  updateAgentDefaults: (body: UpdateAgentDefaultsRequest) => req<HubInfo['agentDefaults']>('PATCH', '/api/agent-defaults', body),
   /** Tailscale ユーザーを許可する（設定ファイルの allowedUsers に書き足す） */
   allowUser: (login: string) => req<AccessInfo>('POST', '/api/access/allow', { login }),
   /** 許可を取り消す（自分自身は取り消せない） */

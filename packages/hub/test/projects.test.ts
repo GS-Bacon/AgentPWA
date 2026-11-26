@@ -4,7 +4,33 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig, type HubConfig } from '../src/config.ts';
-import { createProject, isInside, listDirs, reorderProjects, updateProject, validFolderName, type ProjectDeps } from '../src/projects.ts';
+import { createProject, isInside, listDirs, reorderProjects, updateAgentDefaults, updateProject, validFolderName, type ProjectDeps } from '../src/projects.ts';
+
+describe('AI ごとの既定のモデルとエフォート', () => {
+  it('設定ファイルの agentDefaults に書き、省いた項目は変えず、null で外す', async () => {
+    expect(config.agentDefaults).toEqual({ claude: {}, codex: {} });
+    let all = await updateAgentDefaults(deps(), { agent: 'claude', model: 'opus', effort: 'high' });
+    expect(all.claude).toEqual({ model: 'opus', effort: 'high' });
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).agentDefaults).toEqual({ claude: { model: 'opus', effort: 'high' } });
+    all = await updateAgentDefaults(deps(), { agent: 'claude', effort: null });
+    expect(all.claude).toEqual({ model: 'opus' });
+    expect(loadConfig(configPath).config.agentDefaults.claude).toEqual({ model: 'opus' });
+    await updateAgentDefaults(deps(), { agent: 'claude', model: null });
+    const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(raw.agentDefaults).toBeUndefined();
+    expect(raw.folders).toHaveLength(1);
+    expect(changed).toBe(3);
+  });
+
+  it('正しくない値は断る', async () => {
+    await expect(updateAgentDefaults(deps(), { agent: 'gemini', model: 'x' })).rejects.toThrow('agent');
+    await expect(updateAgentDefaults(deps(), { agent: 'claude', model: 'opus --x' })).rejects.toThrow('モデル名');
+    await expect(updateAgentDefaults(deps(), { agent: 'claude', effort: 'huge' })).rejects.toThrow('effort');
+    await expect(updateAgentDefaults(deps(), { agent: 'claude' })).rejects.toThrow('変える項目');
+    fs.writeFileSync(configPath, JSON.stringify({ agentDefaults: { claude: { effort: 'huge' } } }));
+    expect(() => loadConfig(configPath)).toThrow('agentDefaults');
+  });
+});
 
 let dir: string;
 let root: string;

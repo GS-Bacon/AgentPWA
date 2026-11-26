@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type AgentKind } from '@agentpwa/shared';
-import type { CreateProjectRequest, DirListing, FolderEntry, ProjectTag } from './api.ts';
-import { findAllowedFolder, normalizeTags, PROJECT_COLORS, type HubConfig } from './config.ts';
+import type { AgentDefaults, CreateProjectRequest, DirListing, FolderEntry, ProjectTag } from './api.ts';
+import { findAllowedFolder, normalizeAgentDefaults, normalizeTags, PROJECT_COLORS, type HubConfig } from './config.ts';
 import { HttpError } from './sessions.ts';
 
 const execFileAsync = promisify(execFile);
@@ -285,6 +285,37 @@ async function doUpdate(deps: ProjectDeps, body: unknown): Promise<FolderEntry> 
   config.folders = config.folders.map((f, i) => (i === index ? entry : f));
   deps.onChanged();
   return entry;
+}
+
+/**
+ * AI ごとの既定のモデルとエフォートを変える（設定ファイルの agentDefaults）。
+ * null や空文字なら外して CLI の既定に戻す。本文で省いた項目は変えない。応答は両方の AI の既定
+ */
+export async function updateAgentDefaults(deps: ProjectDeps, body: unknown): Promise<Record<AgentKind, AgentDefaults>> {
+  const b = (body ?? {}) as { agent?: unknown; model?: unknown; effort?: unknown };
+  if (!AGENTS.includes(b.agent as AgentKind)) throw new HttpError(400, "agent は 'claude' か 'codex' にしてください");
+  const agent = b.agent as AgentKind;
+  if (b.model === undefined && b.effort === undefined) throw new HttpError(400, '変える項目（model か effort）を指定してください');
+  const cur = deps.config.agentDefaults?.[agent] ?? {};
+  const next = { ...cur } as Record<string, unknown>;
+  if (b.model !== undefined) next.model = b.model;
+  if (b.effort !== undefined) next.effort = b.effort;
+  // 確かめるついでに、空の値を省いた形にそろえる
+  const checked = normalizeAgentDefaults({ [agent]: next });
+  if (typeof checked === 'string') throw new HttpError(400, checked);
+  const value = checked[agent];
+  await editConfig(deps.configPath, (raw) => {
+    const all = raw.agentDefaults && typeof raw.agentDefaults === 'object' && !Array.isArray(raw.agentDefaults) ? { ...(raw.agentDefaults as Record<string, unknown>) } : {};
+    if (value.model || value.effort) all[agent] = value;
+    else delete all[agent];
+    if (Object.keys(all).length > 0) raw.agentDefaults = all;
+    else delete raw.agentDefaults;
+    return true;
+  });
+  // 監視による読み直しを待たずに反映する
+  deps.config.agentDefaults = { ...deps.config.agentDefaults, [agent]: value };
+  deps.onChanged();
+  return deps.config.agentDefaults;
 }
 
 /**

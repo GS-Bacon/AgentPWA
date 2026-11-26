@@ -1,8 +1,9 @@
 // 設定（Hub の状態、認証、プロジェクト、表示）
 import { useState } from 'react';
-import { DEFAULT_PERMISSION_MODE, type AgentKind } from '@agentpwa/shared';
+import { DEFAULT_PERMISSION_MODE, type AgentKind, type EffortLevel } from '@agentpwa/shared';
 import type { FolderEntry, ProjectColor, ProjectTag } from '@agentpwa/hub/api';
-import { askConfirm, changeAccess, moveProject, setProjectColor, setProjectTags, useStore } from '../lib/store.ts';
+import { askConfirm, changeAccess, moveProject, setAgentDefaults, setProjectColor, setProjectTags, useStore } from '../lib/store.ts';
+import { EFFORTS, EFFORT_LABEL, MODELS, knownDefault, modelLabel, resolvedModelLabel } from '../lib/models.ts';
 import { resetLayout } from '../lib/layout.ts';
 import { AGENT_COLOR, AGENT_LABEL, elapsed, MODE_LABEL, PROJECT_COLOR_HEX, PROJECT_COLOR_LABEL, PROJECT_COLORS } from '../lib/format.ts';
 import { UsageBars } from './common.tsx';
@@ -200,6 +201,50 @@ function AccessSection() {
   );
 }
 
+/**
+ * AI ごとの既定のモデルとエフォート（設定ファイルの agentDefaults。全端末で共有）。
+ * 新しいセッションは、モデル・エフォートを選ばなければこれで始まる。「CLI の既定」は指定しない（CLI の設定に任せる）
+ */
+function AgentDefaultsEditor({ agent }: { agent: AgentKind }) {
+  const cur = useStore((s) => s.info?.agentDefaults?.[agent]) ?? {};
+  const known = knownDefault(agent);
+  const models = MODELS[agent].filter((m) => m.value !== '');
+  // 一覧にないモデル（設定ファイルに正式名を直接書いたときなど）も選択中として出す
+  const items = cur.model && !models.some((m) => m.value === cur.model) ? [...models, { value: cur.model, label: modelLabel(agent, cur.model) }] : models;
+  const id = `defaults-${agent}`;
+  return (
+    <span style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 8, maxWidth: 420 }}>
+      <label className="muted" style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }} htmlFor={`${id}-model`}>
+        既定のモデル
+        <select id={`${id}-model`} className="select" value={cur.model ?? ''} onChange={(e) => void setAgentDefaults(agent, { model: e.target.value || null })}>
+          <option value="">{known.model ? `CLI の既定（${resolvedModelLabel(known.model)}）` : 'CLI の既定'}</option>
+          {items.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="muted" style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }} htmlFor={`${id}-effort`}>
+        既定のエフォート
+        <select
+          id={`${id}-effort`}
+          className="select"
+          value={cur.effort ?? ''}
+          onChange={(e) => void setAgentDefaults(agent, { effort: (e.target.value || null) as EffortLevel | null })}
+        >
+          <option value="">CLI の既定</option>
+          {EFFORTS[agent].map((e) => (
+            <option key={e} value={e}>
+              {EFFORT_LABEL[e]}
+            </option>
+          ))}
+        </select>
+      </label>
+    </span>
+  );
+}
+
 /** fullscreen: iPhone では「新しいプロジェクト」を全画面で開く */
 export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
   const info = useStore((s) => s.info);
@@ -228,6 +273,7 @@ export function Settings({ fullscreen }: { fullscreen?: boolean } = {}) {
                 {ag?.auth.version ? `v${ag.auth.version} · ` : ''}
                 {ag?.auth.detail}
               </span>
+              <AgentDefaultsEditor agent={a} />
               {usage[a].length > 0 && (
                 <div style={{ marginTop: 8, maxWidth: 320 }}>
                   <UsageBars usage={usage[a]} />

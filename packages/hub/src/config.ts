@@ -3,8 +3,46 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_PERMISSION_MODE, PERMISSION_MODES, type AgentKind, type PermissionMode } from '@agentpwa/shared';
-import type { FolderEntry, ProjectColor, ProjectTag } from './api.ts';
+import { DEFAULT_PERMISSION_MODE, EFFORT_LEVELS, PERMISSION_MODES, type AgentKind, type PermissionMode } from '@agentpwa/shared';
+import type { AgentDefaults, FolderEntry, ProjectColor, ProjectTag } from './api.ts';
+
+export const MODEL_INVALID = 'モデル名が正しくありません（英数字と . _ - : [ ] だけ、100文字まで）';
+
+/** モデル名（エイリアスか正式名）。CLI の引数に渡すので、使える文字を絞る */
+export function isModelName(v: string): boolean {
+  return /^[A-Za-z0-9._:[\]-]{1,100}$/.test(v);
+}
+
+const AGENTS: readonly AgentKind[] = ['claude', 'codex'];
+
+/**
+ * 設定ファイルの agentDefaults を確かめて、両方の AI をそろえた形にする（空の値は省く）。
+ * 誤りがあれば、その説明の文字列を返す。
+ */
+export function normalizeAgentDefaults(value: unknown): Record<AgentKind, AgentDefaults> | string {
+  const out: Record<AgentKind, AgentDefaults> = { claude: {}, codex: {} };
+  if (value === undefined || value === null) return out;
+  if (typeof value !== 'object' || Array.isArray(value)) return 'agentDefaults は { "claude": { "model": …, "effort": … }, "codex": { … } } の形にしてください';
+  for (const [agent, v] of Object.entries(value as Record<string, unknown>)) {
+    if (!AGENTS.includes(agent as AgentKind)) return `agentDefaults の AI は 'claude' か 'codex' にしてください: ${agent}`;
+    if (v === undefined || v === null) continue;
+    if (typeof v !== 'object' || Array.isArray(v)) return `agentDefaults.${agent} は { "model": …, "effort": … } の形にしてください`;
+    const d = v as { model?: unknown; effort?: unknown };
+    const e: AgentDefaults = {};
+    if (d.model !== undefined && d.model !== null && d.model !== '') {
+      if (typeof d.model !== 'string' || !isModelName(d.model.trim())) return `agentDefaults.${agent}.model: ${MODEL_INVALID}`;
+      e.model = d.model.trim();
+    }
+    if (d.effort !== undefined && d.effort !== null && d.effort !== '') {
+      if (!EFFORT_LEVELS.includes(d.effort as never)) {
+        return `agentDefaults.${agent}.effort は ${EFFORT_LEVELS.map((x) => `'${x}'`).join(' / ')} のどれかにしてください`;
+      }
+      e.effort = d.effort as AgentDefaults['effort'];
+    }
+    out[agent as AgentKind] = e;
+  }
+  return out;
+}
 
 /** プロジェクトに付けられる色（api.ts の ProjectColor と同じ並び） */
 export const PROJECT_COLORS: readonly ProjectColor[] = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'gray'];
@@ -65,6 +103,11 @@ export interface HubConfig {
   codexPath?: string;
   /** SQLite などを置くフォルダ */
   dataDir: string;
+  /**
+   * AI ごとの既定のモデルとエフォート。新しいセッションで省いたとき（と、既定に戻したとき）に使う。
+   * 省いた項目は CLI の既定。読み込み時に両方の AI をそろえる
+   */
+  agentDefaults: Record<AgentKind, AgentDefaults>;
 }
 
 export interface LoadedConfig {
@@ -87,6 +130,7 @@ function defaults(configPath: string): HubConfig {
     projectRoots: [],
     codex: 'fake',
     dataDir: path.dirname(configPath),
+    agentDefaults: { claude: {}, codex: {} },
   };
 }
 
@@ -105,6 +149,9 @@ function validate(c: HubConfig, file: string): HubConfig {
   if (c.viewerRoots !== undefined && (!Array.isArray(c.viewerRoots) || c.viewerRoots.some((r) => typeof r !== 'string' || !path.isAbsolute(r)))) {
     errors.push('viewerRoots は絶対パスの配列にしてください');
   }
+  const agentDefaults = normalizeAgentDefaults(c.agentDefaults);
+  if (typeof agentDefaults === 'string') errors.push(agentDefaults);
+  else c.agentDefaults = agentDefaults;
   if (c.codex !== 'fake' && c.codex !== 'driver') errors.push("codex は 'fake' か 'driver' にしてください");
   if (c.codexPath !== undefined && typeof c.codexPath !== 'string') errors.push('codexPath は文字列にしてください');
   if (errors.length) throw new Error(`設定ファイル ${file} の誤り:\n- ${errors.join('\n- ')}`);
@@ -189,7 +236,7 @@ export function isModeAllowed(config: HubConfig, cwd: string, agent: AgentKind, 
 }
 
 /**
- * 設定ファイルの変更を見張り、再起動なしで反映できる項目（folders / projectRoots / allowedUsers / allowLocalhost / machineName）を
+ * 設定ファイルの変更を見張り、再起動なしで反映できる項目（folders / projectRoots / allowedUsers / allowLocalhost / machineName / agentDefaults）を
  * config に書き戻す。port・claudePath・codex・codexPath・dataDir の変更は Hub の再起動が必要。
  */
 export function watchConfig(file: string, config: HubConfig, onChange: () => void): () => void {
@@ -202,6 +249,7 @@ export function watchConfig(file: string, config: HubConfig, onChange: () => voi
       config.allowedUsers = next.allowedUsers;
       config.allowLocalhost = next.allowLocalhost;
       config.machineName = next.machineName;
+      config.agentDefaults = next.agentDefaults;
       console.log(`[hub] 設定を読み直しました（フォルダ ${config.folders.length} 件）`);
       onChange();
     } catch (e) {

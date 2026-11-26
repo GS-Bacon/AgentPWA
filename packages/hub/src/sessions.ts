@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_PERMISSION_MODE, EFFORT_LEVELS, PERMISSION_MODES, formatPeerMessage, type AgentDriver, type AgentKind, type AuthCheck, type DriverEvent, type DriverSession, type PermissionMode, type SessionEvent, type SlashCommand, type UserAction } from '@agentpwa/shared';
 import type { CreateSessionRequest, DeleteSessionResult, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
-import { findAllowedFolder, isModeAllowed, type HubConfig } from './config.ts';
+import { findAllowedFolder, isModeAllowed, isModelName, MODEL_INVALID, type HubConfig } from './config.ts';
 import { buildHubGuide } from './hub-guide.ts';
 import type { Store } from './db.ts';
 import { applyEvent, effectiveEvents, isEmptySession, markRead, markUnread, newRecord, normalizeRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
@@ -28,13 +28,6 @@ export class HttpError extends Error {
 const AUTH_CACHE_MS = 60_000;
 /** スラッシュコマンドの一覧を覚えておく時間（スキルを足したときなどは、この時間で反映される） */
 const COMMANDS_CACHE_MS = 5 * 60_000;
-
-const MODEL_INVALID = 'モデル名が正しくありません（英数字と . _ - : [ ] だけ、100文字まで）';
-
-/** モデル名（エイリアスか正式名）。CLI の引数に渡すので、使える文字を絞る */
-function isModelName(v: string): boolean {
-  return /^[A-Za-z0-9._:[\]-]{1,100}$/.test(v);
-}
 
 const FULL_AUTO_DENIED ='「すべて自動」は、このプロジェクトでは許可されていません（設定ファイルの folders で allowFullAuto: true にしたプロジェクトだけで使えます）';
 
@@ -201,9 +194,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (parent && permissionMode === 'full_auto' && parent.permissionMode !== 'full_auto') {
       throw new HttpError(403, '作成元のセッションが「すべて自動」でないため、「すべて自動」のセッションは作れません');
     }
-    const model = req.model?.trim() || undefined;
+    // モデルとエフォートを省いたときは、設定の既定（agentDefaults）。それも無ければ CLI の既定
+    const defaults = this.config.agentDefaults?.[agent] ?? {};
+    const model = req.model?.trim() || defaults.model;
     if (model !== undefined && !isModelName(model)) throw new HttpError(400, MODEL_INVALID);
     if (req.effort !== undefined && !EFFORT_LEVELS.includes(req.effort)) throw new HttpError(400, 'エフォートが正しくありません');
+    const effort = req.effort ?? defaults.effort;
     const auth = await this.checkAuth(agent, true);
     if (!auth.ok || auth.auth === 'api_key') {
       throw new HttpError(409, auth.detail ?? '認証を確認できないため起動しません');
@@ -216,7 +212,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       cwd: folder.path,
       folderName: folder.name,
       model,
-      effort: req.effort,
+      effort,
       permissionMode,
       now,
       // 最初の指示か名前があれば、空のセッションではない
@@ -323,19 +319,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   /**
    * モデルとエフォートを切り替える（省略は変えない、null は既定に戻す）。
+   * 既定は設定の既定（agentDefaults）で、それも無ければ CLI の既定。
    * 動いていないセッションは Hub が覚えておき、次に起動・再開するときに渡す。
    */
   private async setModel(id: string, action: Extract<UserAction, { type: 'set_model' }>): Promise<void> {
     const rec = this.mustGet(id);
+    const defaults = this.config.agentDefaults?.[rec.agent] ?? {};
     const a: Extract<UserAction, { type: 'set_model' }> = { type: 'set_model' };
     if (action.model !== undefined) {
-      const m = action.model?.trim() || null;
+      const m = action.model?.trim() || defaults.model || null;
       if (m !== null && !isModelName(m)) throw new HttpError(400, MODEL_INVALID);
       a.model = m;
     }
     if (action.effort !== undefined) {
       if (action.effort !== null && !EFFORT_LEVELS.includes(action.effort)) throw new HttpError(400, 'エフォートが正しくありません');
-      a.effort = action.effort;
+      a.effort = action.effort ?? defaults.effort ?? null;
     }
     let s = this.live.get(id);
     if (!s) {

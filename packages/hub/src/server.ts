@@ -11,7 +11,7 @@ import { checkOrigin, checkRequest } from './auth.ts';
 import type { HubConfig } from './config.ts';
 import { extraViewerRoots, fileHeaders, resolveProjectFile, toInfo } from './files.ts';
 import { filterMentions, listMentions } from './mentions.ts';
-import { createProject, listDirs, reorderProjects, updateProject, type ProjectDeps } from './projects.ts';
+import { createProject, listDirs, reorderProjects, updateAgentDefaults, updateProject, type ProjectDeps } from './projects.ts';
 import { HttpError, type SessionManager } from './sessions.ts';
 
 declare module 'fastify' {
@@ -179,6 +179,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       protocolVersion: PROTOCOL_VERSION,
       projectRoots: config.projectRoots,
       access: accessInfo(accessDeps),
+      agentDefaults: config.agentDefaults ?? { claude: {}, codex: {} },
     };
   }
 
@@ -208,6 +209,8 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   app.put('/api/projects/order', async (req) => reorderProjects(projectDeps, (req.body as Partial<ReorderProjectsRequest> | undefined)?.projects));
   // プロジェクトの設定の変更（いまは色だけ。UpdateProjectRequest）
   app.patch('/api/projects', async (req) => updateProject(projectDeps, req.body));
+  // AI ごとの既定のモデルとエフォート（設定ファイルの agentDefaults。UpdateAgentDefaultsRequest）
+  app.patch('/api/agent-defaults', async (req) => updateAgentDefaults(projectDeps, req.body));
 
   // アクセスの許可（設定ファイルの allowedUsers）。許可待ちは、許可されていないユーザーが開こうとしたときに覚える
   app.post('/api/access/allow', async (req) => allowUser(accessDeps, req.body));

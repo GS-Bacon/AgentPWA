@@ -48,7 +48,7 @@ export function resolvedModelLabel(resolved: string): string {
 
 /** モデルの表示名。一覧にない名前（正式名など）はそのまま出す */
 export function modelLabel(agent: AgentKind, model: string | undefined): string {
-  return MODELS[agent].find((m) => m.value === (model ?? ''))?.label ?? model ?? '既定';
+  return MODELS[agent].find((m) => m.value === (model ?? ''))?.label ?? (model ? resolvedModelLabel(model) : '既定');
 }
 
 // ---- 既定の覚え書き ----
@@ -87,58 +87,14 @@ export function rememberDefault(agent: AgentKind, s: { model?: string; effort?: 
   }
 }
 
-// ---- 前回選んだモデルとエフォート ----
-// 新規セッションの画面やペインのメニューで選んだものを、プロジェクトごと（とエージェントごと）にこの端末に覚える。
-// プロジェクト横の＋で始めるセッションや、新規セッションの画面の初期値に使う。
+// ---- 設定の既定 ----
+// 設定タブで AI ごとに決める既定のモデルとエフォート（Hub の設定ファイルの agentDefaults。全端末で共有）。
+// 新しいセッションでモデル・エフォートを「既定」のままにすると、Hub がこれを使う（無ければ CLI の既定）。
+// ペインのメニューで「既定」に戻したときも同じ。
 
-const CHOICE_KEY = 'agentpwa.lastChoice.v1';
-/** 以前の新規セッションの画面の覚え書き（プロジェクトごとの覚え書きがないときの予備） */
-const OLD_LAST_KEY = 'agentpwa.newSession.v1';
-export type Choice = { model?: string; effort?: EffortLevel };
-type Choices = { byCwd?: Record<string, Choice>; byAgent?: Partial<Record<AgentKind, Choice>> };
-
-function loadChoices(): Choices {
-  try {
-    return JSON.parse(localStorage.getItem(CHOICE_KEY) ?? '{}') ?? {};
-  } catch {
-    return {};
-  }
-}
-
-/** 選べないもの（エージェントが違う・一覧から消えた）を外す */
-function validChoice(agent: AgentKind, c: Choice | undefined): Choice {
-  if (!c) return {};
-  return {
-    model: c.model && MODELS[agent].some((m) => m.value === c.model) ? c.model : undefined,
-    effort: c.effort && EFFORTS[agent].includes(c.effort) ? c.effort : undefined,
-  };
-}
-
-/** そのプロジェクトで前回選んだモデルとエフォート。なければ同じエージェントで前回選んだもの */
-export function lastChoice(cwd: string, agent: AgentKind): Choice {
-  const all = loadChoices();
-  const own = all.byCwd?.[cwd.toLowerCase()];
-  if (own) return validChoice(agent, own);
-  const byAgent = all.byAgent?.[agent];
-  if (byAgent) return validChoice(agent, byAgent);
-  try {
-    return validChoice(agent, JSON.parse(localStorage.getItem(OLD_LAST_KEY) ?? '{}'));
-  } catch {
-    return {};
-  }
-}
-
-/** 選んだモデルとエフォートを覚える（undefined は「既定」） */
-export function rememberChoice(cwd: string, agent: AgentKind, c: Choice): void {
-  const all = loadChoices();
-  const v: Choice = { model: c.model || undefined, effort: c.effort };
-  all.byCwd = { ...all.byCwd, [cwd.toLowerCase()]: v };
-  all.byAgent = { ...all.byAgent, [agent]: v };
-  try {
-    localStorage.setItem(CHOICE_KEY, JSON.stringify(all));
-  } catch {
-    /* 覚えられなくても既定で始まるだけ */
-  }
+/** モデルの「既定」の選択肢の表示名。設定の既定があればそれ（例: 「既定（Opus（最新））」）、無ければ CLI の既定（分かっていれば） */
+export function defaultModelOptionLabel(agent: AgentKind, configured: string | undefined, cliDefault: string | undefined): string {
+  return configured ? `既定（${modelLabel(agent, configured)}）` : defaultModelLabel(cliDefault);
 }
 
 /** 「既定」の選択肢の表示名（例: 「既定（Opus 5.5）」） */

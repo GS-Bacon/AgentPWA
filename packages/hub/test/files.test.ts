@@ -54,6 +54,7 @@ beforeEach(async () => {
     projectRoots: [],
     codex: 'fake',
     dataDir: dir,
+    agentDefaults: { claude: {}, codex: {} },
   } as HubConfig;
   store = new Store(path.join(dir, 'hub.db'));
   const manager = new SessionManager(store, new Map([['claude', silentDriver]]), config);

@@ -90,6 +90,20 @@ export interface ProjectTag {
 /** プロジェクトに付けられる色（パレット）。実際の色は Web の PROJECT_COLOR_HEX で決める */
 export type ProjectColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink' | 'gray';
 
+/** AI ごとの既定のモデルとエフォート（設定ファイルの agentDefaults）。省いた項目は CLI の既定 */
+export interface AgentDefaults {
+  /** エイリアス（opus など）か正式名 */
+  model?: string;
+  effort?: EffortLevel;
+}
+
+/** PATCH /api/agent-defaults の本文。agent の既定を変える（null で外して CLI の既定に戻す。省いた項目は変えない） */
+export interface UpdateAgentDefaultsRequest {
+  agent: AgentKind;
+  model?: string | null;
+  effort?: EffortLevel | null;
+}
+
 /** PATCH /api/projects の本文。path のプロジェクトの設定（色と # の候補）を変える。省いた項目は変えない */
 export interface UpdateProjectRequest {
   path: string;
@@ -135,6 +149,8 @@ export interface HubInfo {
   projectRoots: string[];
   /** アクセスの許可（設定タブの「アクセス」） */
   access: AccessInfo;
+  /** AI ごとの既定のモデルとエフォート（設定ファイルの agentDefaults）。新しいセッションで省いたときに使う */
+  agentDefaults: Record<AgentKind, AgentDefaults>;
 }
 
 /** 許可されていないのに開こうとした Tailscale ユーザー（Hub のメモリだけに覚える） */
@@ -218,7 +234,7 @@ export interface CreateSessionRequest {
   agent?: AgentKind;
   /** 許可リストのフォルダのパス（AI が作るときは省略でき、作成元のセッションと同じフォルダになる） */
   cwd: string;
-  /** モデルとエフォート。省略はエージェントの既定（実行中も set_model で変えられる） */
+  /** モデルとエフォート。省略は設定の既定（agentDefaults）、それも無ければエージェント（CLI）の既定。実行中も set_model で変えられる */
   model?: string;
   effort?: EffortLevel;
   /** 省略時はプロジェクトの既定（defaultPermissionMode、なければ DEFAULT_PERMISSION_MODE = 'auto'）。full_auto は許可したプロジェクトだけ */

@@ -86,6 +86,7 @@ beforeEach(() => {
     projectRoots: [],
     codex: 'fake',
     dataDir: dir,
+    agentDefaults: { claude: {}, codex: {} },
   };
 });
 
@@ -269,6 +270,22 @@ describe('モデルとエフォート', () => {
     await manager.action(s.id, { type: 'set_model', model: null });
     expect(manager.get(s.id).model).toBeUndefined();
     expect(manager.get(s.id).effort).toBe('max');
+    store.close();
+  });
+
+  it('モデル・エフォートを省くと設定の既定（agentDefaults）で始め、null で戻すときも設定の既定にする', async () => {
+    config.agentDefaults = { claude: { model: 'sonnet', effort: 'low' }, codex: {} };
+    const { manager, store, driver } = setup();
+    const s = await manager.create({ cwd: config.folders[0].path, prompt: 'hi' });
+    expect(driver.starts[0]).toMatchObject({ model: 'sonnet', effort: 'low' });
+    expect(manager.get(s.id)).toMatchObject({ model: 'sonnet', effort: 'low' });
+    // 指定したものはそのまま（省いたエフォートだけ既定）
+    const t = await manager.create({ cwd: config.folders[0].path, model: 'opus', prompt: 'hi' });
+    expect(manager.get(t.id)).toMatchObject({ model: 'opus', effort: 'low' });
+    await manager.action(t.id, { type: 'set_model', model: null, effort: 'max' });
+    expect(manager.get(t.id)).toMatchObject({ model: 'sonnet', effort: 'max' });
+    await manager.action(t.id, { type: 'set_model', effort: null });
+    expect(manager.get(t.id).effort).toBe('low');
     store.close();
   });
 

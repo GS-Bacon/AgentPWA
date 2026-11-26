@@ -74,6 +74,7 @@ npm run setup
 | `folders` | プロジェクト＝セッションを起動してよいフォルダ。`name`、絶対パスの `path`、使う AI の `agent`（`"claude"` / `"codex"`、省略時は `"claude"`）。パスは完全一致のみ。同じ `path` を `agent` を変えて2つ書けば、同じフォルダを Claude と Codex の両方のプロジェクトにできる（同じ AI で2つは不可）。任意で `defaultPermissionMode`（新規セッションの既定の権限モード。`ask` / `auto_edit` / `auto` / `full_auto` / `plan`、省略時は `auto`）と `allowFullAuto`（「すべて自動」を許すか。省略時は `false`。`false` のプロジェクトでは Hub が `full_auto` を拒否する）、`color`（一覧とペインの色） | `[]`（画面の「新しいプロジェクト」で足す） |
 | `projectRoots` | 画面からプロジェクトを作ってよいルートフォルダ（絶対パスの配列）。この下のフォルダだけを選べ、新しいフォルダも作れる（`git init` も選べる）。シンボリックリンクを解決したうえで外に出ていないかを確かめる | 新しく作った設定ファイルではホームフォルダ |
 | `viewerRoots` | プロジェクトのフォルダのほかに、ファイルビュワーで開いてよいフォルダ（絶対パスの配列）。パソコン版 Google ドライブは自動で加わる | `[]` |
+| `agentDefaults` | AI ごとの既定のモデルとエフォート（例: `{ "claude": { "model": "opus", "effort": "high" } }`）。新しいセッションでモデル・エフォートを選ばなかったとき（と、ペインのメニューで「既定」に戻したとき）に使う。画面の「設定 → エージェント」で変えられる | 指定なし（CLI の既定） |
 | `claudePath` | `claude` CLI のパス | PATH と `~/.local/bin` を探す |
 | `codex` | `"fake"`（フィクスチャを流す表示確認用）か `"driver"`（`@agentpwa/driver-codex` を使う） | `"fake"` |
 | `codexPath` | `codex` CLI のパス（`codex: "driver"` のとき） | PATH を探し、無ければ Codex デスクトップアプリのいまの版の `codex.exe` を使う。アプリが更新されて場所が変わっても、次のセッション開始で追いかける |

@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { EffortLevel } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
-import { run } from '../lib/store.ts';
-import { EFFORTS, EFFORT_LABEL, MODELS, aliasModelLabel, defaultEffortLabel, defaultModelLabel, knownDefault, modelSummary, rememberChoice, rememberDefault } from '../lib/models.ts';
+import { run, useStore } from '../lib/store.ts';
+import { EFFORTS, EFFORT_LABEL, MODELS, aliasModelLabel, defaultEffortLabel, defaultModelOptionLabel, knownDefault, modelSummary, rememberDefault } from '../lib/models.ts';
 import { useDismiss } from './common.tsx';
 
 /** 反映を待つ時間。これを過ぎても model が来なければ（失敗）、表示を元に戻す */
@@ -39,22 +39,23 @@ export function ModelButton({ session: s, disabled }: { session: SessionSummary;
   // 解決済みの値は、切り替え中は古いので使わない
   const resolved = pending ? undefined : { model: s.resolvedModel, effort: s.resolvedEffort };
   const defModel = !shown.model && resolved?.model ? resolved.model : knownDefault(s.agent).model;
+  // 設定の既定（agentDefaults）。「既定」を選ぶと、Hub がこれに切り替える（無ければ CLI の既定）
+  const configured = useStore((st) => st.info?.agentDefaults?.[s.agent]) ?? {};
   const models = MODELS[s.agent];
   // 一覧にないモデル（正式名で始めたセッションなど）も選択中として出す
   const modelItems = shown.model && !models.some((m) => m.value === shown.model) ? [...models, { value: shown.model, label: shown.model }] : models;
 
   const apply = async (patch: { model?: string | null; effort?: EffortLevel | null }) => {
     setOpen(false);
+    // 「既定」（null）は、Hub が設定の既定に置き換える
     const next: Shown = {
-      model: patch.model === undefined ? shown.model : patch.model ?? undefined,
-      effort: patch.effort === undefined ? shown.effort : patch.effort ?? undefined,
+      model: patch.model === undefined ? shown.model : patch.model ?? configured.model,
+      effort: patch.effort === undefined ? shown.effort : patch.effort ?? configured.effort,
     };
     if (next.model === shown.model && next.effort === shown.effort) return;
     setPending(next);
     const ok = await run(() => api.action(s.id, { type: 'set_model', ...patch }));
     if (!ok) setPending(null);
-    // 次にこのプロジェクトで始めるセッションも、これで始まるようにする
-    else rememberChoice(s.cwd, s.agent, next);
   };
 
   const label = modelSummary(s.agent, shown.model, shown.effort, resolved);
@@ -81,7 +82,7 @@ export function ModelButton({ session: s, disabled }: { session: SessionSummary;
             return (
               <button key={`m-${m.value}`} role="menuitemradio" aria-checked={on} className="menu-mode" onClick={() => void apply({ model: m.value || null })}>
                 <span className="menu-check" aria-hidden="true">{on ? '✓' : ''}</span>
-                <span>{m.value === '' ? defaultModelLabel(defModel) : on ? aliasModelLabel(s.agent, m.value, resolved?.model) : m.label}</span>
+                <span>{m.value === '' ? defaultModelOptionLabel(s.agent, configured.model, defModel) : on ? aliasModelLabel(s.agent, m.value, resolved?.model) : m.label}</span>
               </button>
             );
           })}
@@ -91,7 +92,7 @@ export function ModelButton({ session: s, disabled }: { session: SessionSummary;
             return (
               <button key={`e-${e ?? ''}`} role="menuitemradio" aria-checked={on} className="menu-mode" onClick={() => void apply({ effort: e ?? null })}>
                 <span className="menu-check" aria-hidden="true">{on ? '✓' : ''}</span>
-                <span>{e ? EFFORT_LABEL[e] : defaultEffortLabel(shown.effort ? undefined : resolved?.effort)}</span>
+                <span>{e ? EFFORT_LABEL[e] : defaultEffortLabel(configured.effort ?? (shown.effort ? undefined : resolved?.effort))}</span>
               </button>
             );
           })}

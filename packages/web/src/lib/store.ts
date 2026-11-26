@@ -1,7 +1,7 @@
 // 画面の状態（セッション一覧・イベント）と Hub との WebSocket 接続。
 // useSyncExternalStore で購読する小さなストア。
 import { useSyncExternalStore } from 'react';
-import type { AgentKind, SessionEvent } from '@agentpwa/shared';
+import type { AgentKind, EffortLevel, SessionEvent } from '@agentpwa/shared';
 import type { HubInfo, ProjectColor, ProjectTag, ServerMessage, SessionSummary, UsageInfo } from '@agentpwa/hub/api';
 import { api } from './api.ts';
 
@@ -373,6 +373,16 @@ export async function setProjectTags(project: { path: string; agent: AgentKind }
   } catch (e) {
     showToast((e as Error).message);
     return false;
+  }
+}
+
+/** AI ごとの既定のモデルとエフォートを変える（null で外して CLI の既定に戻す）。全端末で共有する */
+export async function setAgentDefaults(agent: AgentKind, patch: { model?: string | null; effort?: EffortLevel | null }): Promise<void> {
+  try {
+    const agentDefaults = await api.updateAgentDefaults({ agent, ...patch });
+    if (state.info) set({ info: { ...state.info, agentDefaults } });
+  } catch (e) {
+    showToast((e as Error).message);
   }
 }
 

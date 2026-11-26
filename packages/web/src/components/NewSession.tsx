@@ -7,7 +7,7 @@ import { api } from '../lib/api.ts';
 import { showToast, useStore } from '../lib/store.ts';
 import { AGENT_COLOR, AGENT_LABEL, MODE_LABEL, MODE_NOTE } from '../lib/format.ts';
 import { confirmFullAuto } from '../lib/sessionActions.ts';
-import { EFFORTS, EFFORT_LABEL, MODELS, defaultEffortLabel, defaultModelLabel, knownDefault, lastChoice, rememberChoice } from '../lib/models.ts';
+import { EFFORTS, EFFORT_LABEL, MODELS, defaultEffortLabel, defaultModelOptionLabel, knownDefault } from '../lib/models.ts';
 import { projectKey, type ProjectRef } from '../lib/projects.ts';
 import { AgentIcon, IconClose, IconPlus } from './Icons.tsx';
 import { NewProjectForm } from './NewProject.tsx';
@@ -25,12 +25,11 @@ function loadLast(): { cwd?: string; agent?: AgentKind } {
 
 /**
  * 画面を挟まずに、そのプロジェクトでセッションを始める（プロジェクト横の＋）。
- * モデルとエフォートはそのプロジェクトで前回選んだもの、権限モードはプロジェクトの既定。失敗したらお知らせを出して null
+ * モデルとエフォートは設定の既定（Hub が補う）、権限モードはプロジェクトの既定。失敗したらお知らせを出して null
  */
 export async function startSessionIn(folder: FolderEntry): Promise<SessionSummary | null> {
-  const c = lastChoice(folder.path, folder.agent);
   try {
-    const s = await api.create({ cwd: folder.path, agent: folder.agent, model: c.model, effort: c.effort, permissionMode: folder.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE });
+    const s = await api.create({ cwd: folder.path, agent: folder.agent, permissionMode: folder.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE });
     try {
       localStorage.setItem(LAST_KEY, JSON.stringify({ cwd: folder.path, agent: folder.agent }));
     } catch {
@@ -77,13 +76,14 @@ export function NewSessionForm({
   const allowFullAuto = folder?.allowFullAuto === true;
   // 権限モードの既定はプロジェクトの設定（defaultPermissionMode）。なければ「毎回確認」
   const defaultMode = (f: FolderEntry | undefined): PermissionMode => f?.defaultPermissionMode ?? DEFAULT_PERMISSION_MODE;
-  // モデルとエフォートは、そのプロジェクトで前回選んだもの（空文字が「既定」）
-  const [model, setModel] = useState(() => (cwd ? lastChoice(cwd, agent).model ?? '' : ''));
-  const [effort, setEffort] = useState<EffortLevel | ''>(() => (cwd ? lastChoice(cwd, agent).effort ?? '' : ''));
-  const pickChoice = (p: string, a: AgentKind) => {
-    const c = lastChoice(p, a);
-    setModel(c.model ?? '');
-    setEffort(c.effort ?? '');
+  // モデルとエフォートは「既定」（空文字）から始める。既定は設定タブで AI ごとに決めたもの（Hub が補う）
+  const [model, setModel] = useState('');
+  const [effort, setEffort] = useState<EffortLevel | ''>('');
+  // AI が変わると選べるモデルも変わるので、既定に戻す
+  const pickChoice = (_p: string, a: AgentKind) => {
+    if (a === agent) return;
+    setModel('');
+    setEffort('');
   };
   const select = (f: FolderEntry) => {
     setSel(keyOf(f));
@@ -105,8 +105,11 @@ export function NewSessionForm({
   };
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
-  // 既定が何になるか（既定で動いたセッションから覚えたもの。まだ分からなければ「既定」とだけ出す）
+  // 既定が何になるか。設定の既定（agentDefaults）が無ければ、CLI の既定（既定で動いたセッションから覚えたもの）
+  const configured = info?.agentDefaults?.[agent] ?? {};
   const known = knownDefault(agent);
+  // エフォートの既定はモデルごとに違うので、CLI の既定のエフォートは、モデルも CLI の既定のときだけ添える
+  const defaultEffort = configured.effort ?? (model === '' && !configured.model ? known.effort : undefined);
   const auth = info?.agents[agent]?.auth;
   const blocked = auth && !auth.ok;
 
@@ -120,7 +123,6 @@ export function NewSessionForm({
       } catch {
         /* noop */
       }
-      rememberChoice(cwd, agent, { model: model || undefined, effort: effort || undefined });
       onCreated(s);
     } catch (e) {
       showToast((e as Error).message);
@@ -183,7 +185,7 @@ export function NewSessionForm({
           <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
             {MODELS[agent].map((m) => (
               <option key={m.value} value={m.value}>
-                {m.value === '' ? defaultModelLabel(known.model) : m.label}
+                {m.value === '' ? defaultModelOptionLabel(agent, configured.model, known.model) : m.label}
               </option>
             ))}
           </select>
@@ -191,8 +193,7 @@ export function NewSessionForm({
         <label className="field">
           エフォート
           <select className="select" value={effort} onChange={(e) => setEffort(e.target.value as EffortLevel | '')}>
-            {/* エフォートの既定はモデルごとに違うので、既定のモデルのときだけ値を添える */}
-            <option value="">{defaultEffortLabel(model === '' ? known.effort : undefined)}</option>
+            <option value="">{defaultEffortLabel(defaultEffort)}</option>
             {EFFORTS[agent].map((e) => (
               <option key={e} value={e}>
                 {EFFORT_LABEL[e]}
