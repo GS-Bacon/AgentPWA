@@ -37,6 +37,7 @@ import { Settings } from '../components/Settings.tsx';
 import { FileViewer } from '../components/FileViewer.tsx';
 import { onOpenFile } from '../lib/viewer.ts';
 import { expectLanding, paneRect, playLandings } from './paneMotion.ts';
+import { getPaneDrag, setPaneDrag, usePaneDrag } from './paneDrag.ts';
 import { AgentIcon, IconClose, IconMaximize, IconSidebar } from '../components/Icons.tsx';
 
 /** ペインを動かすドラッグのデータの種類 */
@@ -46,17 +47,20 @@ let draggingPane: string | null = null;
 
 /** ドロップ先の重ね表示の位置 */
 // 分割後のペインの形が分かるように、ペインの縁から少し内側に、新しいペインが入る半分を四角で示す
+// 範囲が変わるときに VS Code と同じく滑らかに動かせるよう、どの範囲も left / top / width / height で表す（styles.css の .drop-overlay）
 const G = 4;
 const HALF = `calc(50% - ${G * 1.5}px)`;
+const FAR = `calc(50% + ${G / 2}px)`;
+const FULL = `calc(100% - ${G * 2}px)`;
 const ZONE_STYLE: Record<DropZone, React.CSSProperties> = {
-  left: { left: G, top: G, bottom: G, width: HALF },
-  right: { right: G, top: G, bottom: G, width: HALF },
-  top: { left: G, right: G, top: G, height: HALF },
-  bottom: { left: G, right: G, bottom: G, height: HALF },
-  center: { inset: G },
+  left: { left: G, top: G, width: HALF, height: FULL },
+  right: { left: FAR, top: G, width: HALF, height: FULL },
+  top: { left: G, top: G, width: FULL, height: HALF },
+  bottom: { left: G, top: FAR, width: FULL, height: HALF },
+  center: { left: G, top: G, width: FULL, height: FULL },
 };
-/** 分割したときに、元のペインが残る側（新しいペインの反対側） */
-const REST_ZONE: Record<Exclude<DropZone, 'center'>, DropZone> = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
+/** 分割したときに、元のペインが残る側（新しいペインの反対側）。中央のときは出さない */
+const REST_ZONE: Record<DropZone, DropZone> = { left: 'right', right: 'left', top: 'bottom', bottom: 'top', center: 'center' };
 const ZONE_LABEL: Record<Exclude<DropZone, 'center'>, string> = { left: '左に分割', right: '右に分割', top: '上に分割', bottom: '下に分割' };
 
 // ドラッグ中は、ビュワーの iframe などがドラッグを横取りしないように、body に印を付ける（styles.css の body.dragging）
@@ -75,6 +79,13 @@ if (typeof document !== 'undefined') {
 /** ペインが表示しているセッション（ビュワーのペインは、開いたファイルのセッション） */
 function paneSession(p: Pane): string | null {
   return p.sessionId ?? p.view?.sessionId ?? null;
+}
+
+/** ドラッグ中の説明に出す、ペインの番号と名前（番号は見出しの左の数字と同じ） */
+function paneTitle(p: Pane | undefined, sessions: Record<string, SessionSummary>, panes: Pane[]): string {
+  if (!p) return '';
+  const name = p.view ? p.view.path.split(/[\\/]/).pop() || p.view.path : (p.sessionId && sessions[p.sessionId]?.title) || '空のペイン';
+  return `ペイン${panes.indexOf(p) + 1}「${name}」`;
 }
 
 function PaneView({
@@ -129,9 +140,15 @@ function PaneView({
     draggingPane = pane.id;
     e.dataTransfer.setData(PANE_DRAG_TYPE, pane.id);
     e.dataTransfer.effectAllowed = 'move';
+    // dragstart の中で画面を書き換えると Chrome はドラッグを取りやめることがあるので、次の順番で印を付ける
+    const id = pane.id;
+    setTimeout(() => {
+      if (draggingPane === id) setPaneDrag({ source: id, target: null, zone: null });
+    }, 0);
   };
   const onHeadDragEnd = () => {
     draggingPane = null;
+    setPaneDrag(null);
   };
 
   // ペインのドラッグと、一覧からのセッションのドラッグを受け付ける
@@ -142,12 +159,15 @@ function PaneView({
       if (!isPane && !types.includes(DRAG_TYPE)) return;
       if (isPane && draggingPane === pane.id) {
         setZone(null);
+        setPaneDrag({ source: pane.id, target: null, zone: null });
         return;
       }
       e.preventDefault();
       e.dataTransfer.dropEffect = isPane ? 'move' : 'copy';
       const z = zoneAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY);
       if (z !== zone) setZone(z);
+      // 掴んだペインの側にも、落とすとどうなるかを出す
+      if (isPane && draggingPane) setPaneDrag({ source: draggingPane, target: pane.id, zone: z });
       const kind = isPane ? 'pane' : 'session';
       if (kind !== dragKind) setDragKind(kind);
     },
@@ -155,11 +175,16 @@ function PaneView({
       // Safari などは relatedTarget が空のことがあるので、ポインターがペインの外に出たかを位置で見る
       // （中の要素をまたぐたびに消えると、重ね表示がちらつく）
       const r = e.currentTarget.getBoundingClientRect();
-      if (e.clientX <= r.left || e.clientX >= r.right || e.clientY <= r.top || e.clientY >= r.bottom) setZone(null);
+      if (e.clientX <= r.left || e.clientX >= r.right || e.clientY <= r.top || e.clientY >= r.bottom) {
+        setZone(null);
+        const d = getPaneDrag();
+        if (d?.target === pane.id) setPaneDrag({ ...d, target: null, zone: null });
+      }
     },
     onDrop: (e: React.DragEvent) => {
       const z = zone ?? zoneAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY);
       setZone(null);
+      setPaneDrag(null);
       const paneId = e.dataTransfer.getData(PANE_DRAG_TYPE);
       const sessionId = e.dataTransfer.getData(DRAG_TYPE);
       if (!paneId && !sessionId) return;
@@ -179,14 +204,40 @@ function PaneView({
       else update((l) => dropSession(l, sessionId, pane.id, z));
     },
   };
-  // ドロップすると何が起きるかを、範囲と文字で示す（VS Code と同じく、分割なら新しいペインが入る半分を塗る）
+  // ドロップすると何が起きるかを、落とす前に範囲と文字で示す（VS Code と同じく、分割なら新しいペインが入る半分を塗り、
+  // 範囲が変わるときは四角が滑らかに動く）。掴んだペインの名前も出して、どのペインがここに来るかを分かるようにする
+  const drag = usePaneDrag();
+  const srcTitle = dragKind === 'pane' && drag ? paneTitle(layout.panes.find((p) => p.id === drag.source), sessions, layout.panes) : '';
   const dropOverlay = zone && (
     <>
-      {zone !== 'center' && <div aria-hidden className="drop-rest" style={ZONE_STYLE[REST_ZONE[zone]]} />}
+      <div aria-hidden className="drop-rest" style={{ ...ZONE_STYLE[REST_ZONE[zone]], opacity: zone === 'center' ? 0 : 1 }} />
       <div aria-hidden className="drop-overlay" style={ZONE_STYLE[zone]}>
-        <span className="drop-label">{zone === 'center' ? (dragKind === 'pane' ? '入れ替え' : 'このペインに表示') : ZONE_LABEL[zone]}</span>
+        <span className="drop-label">
+          <b>{zone === 'center' ? (dragKind === 'pane' ? '入れ替え' : 'このペインに表示') : ZONE_LABEL[zone]}</b>
+          {srcTitle && <span className="drop-sub ellipsis">{srcTitle}がここに来ます</span>}
+        </span>
       </div>
     </>
+  );
+  // 掴んでいるペインの側: 落とした後、ここがどうなるか（入れ替えなら相手のペインが来る、分割・移動ならここは詰まる）
+  const sourceOverlay = drag?.source === pane.id && (
+    <div aria-hidden className={`drag-source${drag.target && drag.zone === 'center' ? ' swap' : ''}`}>
+      <span className="drop-label">
+        {!drag.target ? (
+          <b>移動するペイン</b>
+        ) : drag.zone === 'center' ? (
+          <>
+            <b>入れ替え</b>
+            <span className="drop-sub ellipsis">{paneTitle(layout.panes.find((p) => p.id === drag.target), sessions, layout.panes)}がここに来ます</span>
+          </>
+        ) : (
+          <>
+            <b>ここから移動</b>
+            <span className="drop-sub">この場所は詰まり、隣のペインが広がります</span>
+          </>
+        )}
+      </span>
+    </div>
   );
 
   const quick = sortedSessions(sessions).filter((x) => !layout.panes.some((p) => p.sessionId === x.id)).slice(0, 6);
@@ -232,6 +283,7 @@ function PaneView({
           onHeadDragStart={onHeadDragStart}
         />
         {dropOverlay}
+        {sourceOverlay}
       </section>
     );
   }
@@ -296,6 +348,8 @@ function PaneView({
           </div>
         </div>
       )}
+      {dropOverlay}
+      {sourceOverlay}
     </section>
   );
 }
