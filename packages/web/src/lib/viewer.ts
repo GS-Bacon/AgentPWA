@@ -51,3 +51,27 @@ export function looksLikePath(text: string): boolean {
 export function stripLineNo(text: string): string {
   return text.trim().replace(/:\d+(:\d+)?$/, '');
 }
+
+/**
+ * 返答の Markdown のリンク先（[名前](G:\a\b.html) や [名前](src/a.ts#L12) など）が手元のファイルなら、そのパスを返す。
+ * http(s) や mailto などの URL と、ページ内の # だけのリンクは null（ふつうのリンクとして扱う）。
+ */
+export function linkToFilePath(href: string | undefined): string | null {
+  let t = (href ?? '').trim();
+  if (!t || t.startsWith('#')) return null;
+  // file:///G:/a/b.html → G:/a/b.html、file:///home/a → /home/a
+  if (/^file:/i.test(t)) t = t.replace(/^file:\/*/i, '/').replace(/^\/([a-z]:)/i, '$1');
+  // ドライブ文字（G:\ や G:/。Markdown の変換で \ は %5C になる）以外のスキームは URL
+  else if (/^[a-z][a-z0-9+.-]*:/i.test(t) && !/^[a-z]:([\\/]|%5c)/i.test(t)) return null;
+  // 行番号（#L12、#L12-L20、:12）を外す
+  t = t.replace(/#L\d+(-L?\d+)?$/i, '');
+  if (t.includes('%')) {
+    try {
+      t = decodeURIComponent(t);
+    } catch {
+      // そのまま使う
+    }
+  }
+  t = stripLineNo(t);
+  return t || null;
+}

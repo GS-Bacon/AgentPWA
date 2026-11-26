@@ -1,15 +1,34 @@
 // Markdown の表示。インラインコードのうち、ファイルのパスに見えるもの（`slides/index.html` など）は、
 // タップするとファイルビュワーで開く（docs/architecture.md の 5.1）。会話の返答とビュワーの Markdown で共通に使う。
+// リンク（[名前](G:\a\b.html) など）も、リンク先が手元のファイルならビュワーで開く。
+// ふつうの <a href> にすると、ドライブ文字のパスは安全でない URL として href が空になり、押すとページが読み直されてしまう。
 // コードブロックには右上にコピーボタンを付ける。
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { IconCheck, IconCopy } from './Icons.tsx';
-import { looksLikePath, openFile, stripLineNo } from '../lib/viewer.ts';
+import { linkToFilePath, looksLikePath, openFile, stripLineNo } from '../lib/viewer.ts';
+
+/** 手元のファイルへのリンクは、そのまま残す（既定の変換はドライブ文字のパスを空にしてしまう） */
+const urlTransform = (url: string) => (linkToFilePath(url) !== null ? url : defaultUrlTransform(url));
 
 export const PathMarkdown = memo(function PathMarkdown({ text, sessionId, className = 'msg-assistant' }: { text: string; sessionId: string; className?: string }) {
   const components = useMemo(
     () => ({
+      a({ href, children, ...rest }: React.ComponentProps<'a'> & { node?: unknown }) {
+        const { node: _n, ...props } = rest;
+        const file = linkToFilePath(href);
+        if (file !== null) {
+          return (
+            <button type="button" className="path-link" title={`ビュワーで開く: ${file}`} onClick={() => openFile(sessionId, file)}>
+              {children}
+            </button>
+          );
+        }
+        // ページ内の見出し（#...）はそのまま。外のページは別のタブで開く（アプリの画面を置き換えない）
+        if (!href || href.startsWith('#')) return <a href={href} {...props}>{children}</a>;
+        return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
+      },
       pre({ children, ...rest }: React.ComponentProps<'pre'> & { node?: unknown }) {
         const { node: _n, ...props } = rest;
         return <CodeBlock {...props}>{children}</CodeBlock>;
@@ -32,7 +51,7 @@ export const PathMarkdown = memo(function PathMarkdown({ text, sessionId, classN
   );
   return (
     <div className={className}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>{text}</ReactMarkdown>
     </div>
   );
 });
