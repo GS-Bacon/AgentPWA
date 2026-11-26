@@ -482,6 +482,15 @@ a.btn { text-decoration: none; }
   padding: 4px 10px; font-size: 13px; font-weight: 600;
   color: var(--fg); background: var(--bg); border: 1px solid var(--link);
 }
+/* ペインを分割・移動したとき: ドロップの枠が新しい位置まで飛び（.pane-ghost）、着いたペインの縁が光る（.pane-flash）。desktop/paneMotion.ts */
+.pane-ghost {
+  position: fixed; z-index: 50; pointer-events: none;
+  background: rgba(68, 147, 248, 0.28); border: 2px solid var(--link);
+}
+.pane-flash {
+  position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  background: rgba(68, 147, 248, 0.10); border: 2px solid var(--link);
+}
 /* ドラッグ中は、ビュワーの iframe などがドラッグを横取りしないようにする */
 body.dragging iframe, body.dragging embed, body.dragging object { pointer-events: none; }
 

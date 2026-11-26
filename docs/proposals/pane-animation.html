@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ペインの分割・移動のアニメーション 修正案</title>
+<style>
+  :root {
+    --bg: #0d1117; --bg-subtle: #161b22; --bg-inset: #010409; --border: #30363d; --border-muted: #21262d;
+    --fg: #e6edf3; --fg-muted: #8b949e; --fg-faint: #6e7681; --link: #4493f8; --accent-bg: rgba(68, 147, 248, 0.28);
+    --success: #3fb950; --attention: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 24px 20px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 36px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 14px; margin: 0; }
+  p, li { color: var(--fg); }
+  .muted { color: var(--fg-muted); }
+  code { font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; background: var(--bg-subtle); border: 1px solid var(--border-muted); padding: 0 4px; }
+  pre { font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; background: var(--bg-subtle); border: 1px solid var(--border); padding: 12px; overflow-x: auto; }
+
+  /* 操作 */
+  .toolbar { position: sticky; top: 0; z-index: 10; background: var(--bg); padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button { font: inherit; font-size: 13px; color: var(--fg); background: #21262d; border: 1px solid #363b42; border-radius: 6px; padding: 4px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { background: #292e36; border-color: #8b949e; }
+  button:disabled { color: var(--fg-faint); cursor: default; }
+  button.primary { background: #238636; border-color: rgba(240,246,252,.1); }
+  label.chk { display: inline-flex; gap: 6px; align-items: center; color: var(--fg-muted); font-size: 13px; margin-left: 8px; }
+
+  /* 比較の並び */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; margin-top: 16px; }
+  .card { border: 1px solid var(--border); background: var(--bg-subtle); display: flex; flex-direction: column; }
+  .card header { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: baseline; }
+  .card header .tag { font-size: 12px; color: var(--fg-muted); border: 1px solid var(--border); padding: 0 6px; }
+  .card header .tag.rec { color: var(--success); border-color: rgba(63,185,80,.5); }
+  .card .desc { padding: 8px 12px 12px; font-size: 13px; color: var(--fg-muted); }
+
+  /* 疑似アプリ */
+  .stage { position: relative; height: 280px; background: var(--border); overflow: hidden; }
+  .pane { position: absolute; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+  .pane .head { height: 28px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); font-size: 12px; white-space: nowrap; }
+  .pane .grip { color: var(--fg-faint); letter-spacing: -2px; }
+  .pane .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .pane .body { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  .pane .line { height: 6px; background: var(--border-muted); }
+  .pane .big { position: absolute; right: 10px; bottom: 4px; font-size: 40px; font-weight: 700; color: #1c2129; line-height: 1; pointer-events: none; }
+  .ghost { position: absolute; z-index: 5; pointer-events: none; background: var(--accent-bg); border: 2px solid var(--link); }
+  .flash { position: absolute; inset: 0; z-index: 4; pointer-events: none; border: 2px solid var(--link); background: rgba(68,147,248,.10); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--bg-subtle); font-weight: 600; }
+  .good { color: var(--success); } .warn { color: var(--attention); }
+  .note { border-left: 3px solid var(--link); padding: 4px 12px; background: var(--bg-subtle); margin: 12px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ペインの分割・移動にアニメーションを付ける 修正案</h1>
+  <p class="muted">いまは、ドロップした瞬間にペインの並びが切り替わるだけなので、どのペインがどこへ行ったのか目で追えない。下の 4 つは同じ操作を同時に再生する。ボタンを押して見比べてほしい（「ゆっくり」で 4 倍遅くなる）。</p>
+
+  <div class="toolbar">
+    <button data-act="splitB">B を下に分割（新しいペイン）</button>
+    <button data-act="moveA">A を B の下へ移動</button>
+    <button data-act="swapAC">A と C を入れ替え</button>
+    <button data-act="splitRight">C の右に分割</button>
+    <button data-act="closeC">C を閉じる</button>
+    <button data-act="reset" class="primary">最初に戻す</button>
+    <label class="chk"><input type="checkbox" id="slow"> ゆっくり（×4）</label>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <header><h3>現状</h3><span class="tag">アニメーションなし</span></header>
+      <div class="stage" data-mode="none"></div>
+      <div class="desc">一瞬で切り替わる。ペインが 3 枚以上あると、どれが動いたのか分からない。</div>
+    </section>
+    <section class="card">
+      <header><h3>案A 枠が飛んで着地</h3><span class="tag rec">おすすめ</span></header>
+      <div class="stage" data-mode="ghost"></div>
+      <div class="desc">ドロップしたときの青い枠（いまの <code>.drop-overlay</code> と同じ見た目）が、ペインの新しい位置まで 200ms で動き、着地したペインの縁を一瞬光らせる。並び自体はすぐ切り替わるので、中身は伸び縮みしない。</div>
+    </section>
+    <section class="card">
+      <header><h3>案B ペインごと動かす</h3><span class="tag">見た目は一番分かりやすい</span></header>
+      <div class="stage" data-mode="slide"></div>
+      <div class="desc">全部のペインが新しい位置と大きさまで滑らかに動く。ただし本物では、動いている間ずっと会話の中身を組み直すので重い（下の比較を参照）。</div>
+    </section>
+    <section class="card">
+      <header><h3>案C 着地したペインだけ浮き出る</h3><span class="tag">一番軽い</span></header>
+      <div class="stage" data-mode="fade"></div>
+      <div class="desc">並びはすぐ切り替え、動いた・増えたペインだけを、来た向きから少しずらして薄い状態から出す。どこから来たかは伝わりにくい。</div>
+    </section>
+  </div>
+
+  <h2>比較</h2>
+  <table>
+    <tr><th></th><th>どこへ行ったか</th><th>どこから来たか</th><th>重さ</th><th>中身の見え方</th><th>作る量</th></tr>
+    <tr><td>案A 枠が飛んで着地</td><td class="good">分かる</td><td class="good">分かる（ドロップの枠から続く）</td><td class="good">軽い（枠 1 枚を transform で動かすだけ）</td><td class="good">崩れない</td><td>中（重ね表示 1 つ）</td></tr>
+    <tr><td>案B ペインごと動かす</td><td class="good">分かる</td><td class="good">分かる</td><td class="warn">重い。幅・高さを毎フレーム変えると、長い会話のペインで引っかかる。transform の拡大縮小で代わりにすると文字が伸びる</td><td class="warn">動いている間、文字が折り返し直す</td><td>大（並べ方を絶対配置に作り替える）</td></tr>
+    <tr><td>案C 浮き出る</td><td class="good">分かる</td><td class="warn">分かりにくい</td><td class="good">軽い</td><td class="good">崩れない</td><td>小</td></tr>
+  </table>
+
+  <h2>おすすめ: 案A</h2>
+  <ul>
+    <li>ドラッグ中に出している「ここに入る」という青い枠が、そのまま新しいペインの位置に移るので、操作と結果がつながって見える。</li>
+    <li>動くのは中身のない枠だけなので、会話が長いペインでも引っかからない。</li>
+    <li>入れ替えのときは枠が 2 枚、すれ違うように動く。閉じたときは何も出さない（残ったペインが広がるだけで分かるため）。</li>
+    <li>OS の「視差効果を減らす」（<code>prefers-reduced-motion</code>）が有効なら、枠は出さずに縁を光らせるだけにする。</li>
+    <li>長さは 200ms、イージングは <code>cubic-bezier(0.2, 0, 0, 1)</code>。光らせる縁は 600ms で消す。影・グラデーションは使わない（デザインの決まりのとおり）。</li>
+  </ul>
+
+  <h3 style="margin-top:16px">作り方（DesktopApp.tsx）</h3>
+  <ol>
+    <li>ペインの外側の要素に <code>data-pane-id</code> を付ける。</li>
+    <li>ドロップ（<code>onDrop</code>）で <code>update()</code> する直前に、全ペインの <code>getBoundingClientRect()</code> と、ドロップの枠（<code>.drop-overlay</code>）の位置を控える。</li>
+    <li><code>useLayoutEffect</code> で並びが変わった後の位置を読み、動いた・増えたペインについて、控えた位置 → 新しい位置へ枠を Web Animations API（<code>element.animate</code>）で動かす。枠は <code>CustomPanes</code> の上に <code>position: fixed</code> で重ねる。</li>
+    <li>枠が着いたら、そのペインに縁取りを重ねて薄くしていく。</li>
+  </ol>
+<pre>// 控える（onDrop の中）
+pendingFlip.current = {
+  from: rectsOf(document.querySelectorAll('[data-pane-id]')),     // ペインごとの元の位置
+  dropRect: overlayRef.current?.getBoundingClientRect() ?? null,  // ドロップの枠
+  moved: paneId ?? null,                                         // 動かしたペイン（新規なら null）
+};
+
+// 並びが変わった後
+useLayoutEffect(() =&gt; {
+  const f = pendingFlip.current; pendingFlip.current = null;
+  if (!f) return;
+  for (const el of document.querySelectorAll&lt;HTMLElement&gt;('[data-pane-id]')) {
+    const id = el.dataset.paneId!, to = el.getBoundingClientRect();
+    const from = f.dropRect ?? f.from.get(id);     // ドロップの枠から飛ばす
+    if (!from || (id !== f.moved &amp;&amp; f.from.has(id))) continue; // 動いた・増えたペインだけ
+    flyGhost(from, to).then(() =&gt; flashPane(el));
+  }
+}, [layout]);</pre>
+
+  <div class="note">
+    <strong>あわせて直したい点:</strong> いまの <code>CustomPanes</code> は「列 → 行」の入れ子で描いているため、ペインを別の列へ動かすと React がそのペインを作り直し、会話のスクロール位置が先頭に戻る（列をまたぐ入れ替えも同じ）。これも「どうなったか分かりにくい」原因になっていると思われる。案A とは別に、ペインを列の外で key を保ったまま描く形（CSS Grid か絶対配置）に変えると直せる。案B を選ぶ場合はこの作り替えが前提になる。
+  </div>
+</main>
+
+<script>
+(() => {
+  const COLORS = { A: '#4493f8', B: '#3fb950', C: '#d29922', D: '#ab7df8', E: '#f778ba', F: '#db6d28', G: '#39c5cf' };
+  const NAMES = { A: 'API の修正', B: 'README 更新', C: 'テスト追加', D: '新しいセッション', E: '新しいセッション', F: '新しいセッション', G: '新しいセッション' };
+  let model, next;
+  const reset = () => {
+    model = [{ w: 1, rows: [{ id: 'A', w: 1 }] }, { w: 1, rows: [{ id: 'B', w: 1 }, { id: 'C', w: 1 }] }];
+    next = 'D'.charCodeAt(0);
+  };
+  reset();
+  const slow = () => (document.getElementById('slow').checked ? 4 : 1);
+  const EASE = 'cubic-bezier(0.2, 0, 0, 1)';
+
+  // ---- 並びの操作（layout.ts と同じ考え方） ----
+  const find = (id) => { for (const [ci, c] of model.entries()) { const ri = c.rows.findIndex((r) => r.id === id); if (ri >= 0) return { ci, ri }; } return null; };
+  const avg = (xs) => xs.reduce((n, x) => n + x.w, 0) / xs.length;
+  const detach = (id) => { model = model.map((c) => { const rows = c.rows.filter((r) => r.id !== id); return { ...c, rows: rows.length === 1 ? [{ ...rows[0], w: 1 }] : rows }; }).filter((c) => c.rows.length); };
+  const insert = (id, target, zone) => {
+    const { ci, ri } = find(target);
+    if (zone === 'left' || zone === 'right') model.splice(zone === 'left' ? ci : ci + 1, 0, { w: avg(model), rows: [{ id, w: 1 }] });
+    else model[ci].rows.splice(zone === 'top' ? ri : ri + 1, 0, { id, w: avg(model[ci].rows) });
+  };
+  const newId = () => String.fromCharCode(next++);
+
+  const ACTIONS = {
+    splitB: { ok: () => find('B'), run: () => { const id = newId(); insert(id, 'B', 'bottom'); return { target: 'B', zone: 'bottom', id, added: true }; } },
+    moveA: { ok: () => find('A') && find('B'), run: () => { detach('A'); insert('A', 'B', 'bottom'); return { target: 'B', zone: 'bottom', id: 'A' }; } },
+    swapAC: { ok: () => find('A') && find('C'), run: () => {
+      model = model.map((c) => ({ ...c, rows: c.rows.map((r) => ({ ...r, id: r.id === 'A' ? 'C' : r.id === 'C' ? 'A' : r.id })) }));
+      return { target: 'C', zone: 'center', id: 'A', swap: 'C' };
+    } },
+    splitRight: { ok: () => find('C'), run: () => { const id = newId(); insert(id, 'C', 'right'); return { target: 'C', zone: 'right', id, added: true }; } },
+    closeC: { ok: () => find('C') && model.flatMap((c) => c.rows).length > 1, run: () => { detach('C'); return { closed: 'C' }; } },
+  };
+
+  // ---- 位置の計算 ----
+  function rects(W, H) {
+    const out = new Map(); const tw = model.reduce((n, c) => n + c.w, 0); let x = 0;
+    model.forEach((c, ci) => {
+      const cw = (c.w / tw) * W; const th = c.rows.reduce((n, r) => n + r.w, 0); let y = 0;
+      c.rows.forEach((r, ri) => {
+        const rh = (r.w / th) * H;
+        out.set(r.id, { x: Math.round(x), y: Math.round(y), w: Math.round(cw) - (ci < model.length - 1 ? 1 : 0), h: Math.round(rh) - (ri < c.rows.length - 1 ? 1 : 0) });
+        y += rh;
+      });
+      x += cw;
+    });
+    return out;
+  }
+  // ドロップの枠（DesktopApp の ZONE_STYLE と同じ: 縁から 4px 内側、半分）
+  function zoneRect(r, zone) {
+    const G = 4, hw = r.w / 2 - G * 1.5, hh = r.h / 2 - G * 1.5;
+    switch (zone) {
+      case 'left': return { x: r.x + G, y: r.y + G, w: hw, h: r.h - 2 * G };
+      case 'right': return { x: r.x + r.w - G - hw, y: r.y + G, w: hw, h: r.h - 2 * G };
+      case 'top': return { x: r.x + G, y: r.y + G, w: r.w - 2 * G, h: hh };
+      case 'bottom': return { x: r.x + G, y: r.y + r.h - G - hh, w: r.w - 2 * G, h: hh };
+      default: return { x: r.x + G, y: r.y + G, w: r.w - 2 * G, h: r.h - 2 * G };
+    }
+  }
+  const place = (el, r) => Object.assign(el.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' });
+
+  // ---- 描画 ----
+  const stages = [...document.querySelectorAll('.stage')].map((el) => ({ el, mode: el.dataset.mode, nodes: new Map(), cur: new Map() }));
+  function makePane(id) {
+    const el = document.createElement('div'); el.className = 'pane';
+    el.innerHTML = `<div class="head"><span class="grip">⋮⋮</span><span class="dot" style="background:${COLORS[id]}"></span><span>${NAMES[id]}</span></div>
+      <div class="body">${[90, 70, 82, 40, 76, 60, 88, 50].map((w) => `<div class="line" style="width:${w}%"></div>`).join('')}</div><div class="big">${id}</div>`;
+    return el;
+  }
+  function ghost(stage, from, to, d) {
+    const g = document.createElement('div'); g.className = 'ghost'; place(g, to); stage.el.appendChild(g);
+    const sx = from.w / to.w, sy = from.h / to.h;
+    const a = g.animate([
+      { transformOrigin: '0 0', transform: `translate(${from.x - to.x}px, ${from.y - to.y}px) scale(${sx}, ${sy})`, opacity: 1 },
+      { transformOrigin: '0 0', transform: 'none', opacity: 1, offset: 0.85 },
+      { transformOrigin: '0 0', transform: 'none', opacity: 0 },
+    ], { duration: d * 1.15, easing: EASE });
+    return a.finished.then(() => g.remove());
+  }
+  function flash(el, d) {
+    const f = document.createElement('div'); f.className = 'flash'; el.appendChild(f);
+    f.animate([{ opacity: 1 }, { opacity: 0 }], { duration: d * 3, easing: 'ease-out' }).finished.then(() => f.remove());
+  }
+
+  function render(stage, info) {
+    const W = stage.el.clientWidth, H = stage.el.clientHeight;
+    const old = stage.cur; const now = rects(W, H); stage.cur = now;
+    const d = 200 * slow();
+    // 消えたペイン
+    for (const [id, el] of stage.nodes) if (!now.has(id)) {
+      stage.nodes.delete(id);
+      if (stage.mode === 'slide') el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: d }).finished.then(() => el.remove()); else el.remove();
+    }
+    const changed = info && !info.closed ? [info.id, info.swap].filter(Boolean) : [];
+    const startOf = (id) => {
+      if (!info) return null;
+      if (info.added && id === info.id) return zoneRect(old.get(info.target), info.zone);
+      if (id === info.id && info.zone !== 'center') return zoneRect(old.get(info.target), info.zone);
+      return old.get(id);
+    };
+    for (const [id, r] of now) {
+      let el = stage.nodes.get(id); const fresh = !el;
+      if (fresh) { el = makePane(id); stage.nodes.set(id, el); stage.el.appendChild(el); }
+      if (stage.mode === 'slide' && info) {
+        const from = fresh ? startOf(id) : old.get(id);
+        el.style.transition = 'none'; if (from) place(el, from); void el.offsetWidth;
+        el.style.transition = `left ${d}ms ${EASE}, top ${d}ms ${EASE}, width ${d}ms ${EASE}, height ${d}ms ${EASE}`;
+        if (changed.includes(id)) el.style.zIndex = 2; else el.style.zIndex = 1;
+      } else { el.style.transition = 'none'; }
+      place(el, r);
+    }
+    if (!info || info.closed) return;
+    if (stage.mode === 'ghost') {
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      for (const id of changed) {
+        const el = stage.nodes.get(id); const to = now.get(id);
+        const from = id === info.id && info.zone === 'center' ? old.get(id) : startOf(id);
+        if (reduce || !from) flash(el, d); else ghost(stage, from, to, d).then(() => flash(el, d));
+      }
+    }
+    if (stage.mode === 'fade') {
+      for (const id of changed) {
+        const el = stage.nodes.get(id); const to = now.get(id); const from = startOf(id) ?? to;
+        const dx = Math.sign(from.x - to.x) * 16, dy = Math.sign(from.y - to.y) * 16;
+        el.animate([{ opacity: 0, transform: `translate(${dx}px, ${dy}px)` }, { opacity: 1, transform: 'none' }], { duration: d * 1.2, easing: EASE });
+      }
+    }
+  }
+
+  const refresh = () => {
+    document.querySelectorAll('[data-act]').forEach((b) => { const a = ACTIONS[b.dataset.act]; if (a) b.disabled = !a.ok(); });
+  };
+  document.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.act === 'reset') {
+      reset(); stages.forEach((s) => { s.nodes.forEach((el) => el.remove()); s.nodes.clear(); s.cur = new Map(); render(s, null); });
+    } else {
+      const info = ACTIONS[b.dataset.act].run(); stages.forEach((s) => render(s, info));
+    }
+    refresh();
+  }));
+  stages.forEach((s) => render(s, null)); refresh();
+  addEventListener('resize', () => stages.forEach((s) => render(s, null)));
+})();
+</script>
+</body>
+</html>

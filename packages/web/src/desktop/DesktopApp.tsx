@@ -2,7 +2,7 @@
 // 並べ方は VS Code のエディターグループと同じ操作: ペインの見出しをドラッグして、ほかのペインの上下左右の端に落とすと分割、
 // 中央に落とすと入れ替え。境界をドラッグして大きさを変え、境界のダブルクリックで均等にする。
 // 画面に収まらないときは横スクロール（iPad は横スワイプ）で表示する。
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.ts';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { discardIfEmpty, getState, isUnreadOrWaiting, needsAnswer, onSessionCreatedByAgent, onSessionsClosed, run, sortedSessions, useStore } from '../lib/store.ts';
@@ -36,6 +36,7 @@ import { NewSessionForm, startSessionIn } from '../components/NewSession.tsx';
 import { Settings } from '../components/Settings.tsx';
 import { FileViewer } from '../components/FileViewer.tsx';
 import { onOpenFile } from '../lib/viewer.ts';
+import { expectLanding, paneRect, playLandings } from './paneMotion.ts';
 import { AgentIcon, IconClose, IconMaximize, IconSidebar } from '../components/Icons.tsx';
 
 /** ペインを動かすドラッグのデータの種類 */
@@ -163,6 +164,16 @@ function PaneView({
       const sessionId = e.dataTransfer.getData(DRAG_TYPE);
       if (!paneId && !sessionId) return;
       e.preventDefault();
+      // 動いた・増えたペインが分かるように、ドロップの枠を新しい位置まで飛ばす（paneMotion.ts）
+      const here = e.currentTarget.getBoundingClientRect();
+      const overlay = e.currentTarget.querySelector('.drop-overlay')?.getBoundingClientRect() ?? here;
+      if (paneId && z === 'center') {
+        // 入れ替え: 2枚がそれぞれ相手の位置へ動く
+        expectLanding(() => paneId, paneRect(paneId));
+        expectLanding(() => pane.id, here);
+      } else if (paneId) expectLanding(() => paneId, overlay);
+      else if (z === 'center') expectLanding(() => pane.id, null);
+      else expectLanding((l) => l.panes.find((p) => p.sessionId === sessionId)?.id, overlay);
       setMaximized(null);
       if (paneId) update((l) => movePane(l, paneId, pane.id, z));
       else update((l) => dropSession(l, sessionId, pane.id, z));
@@ -376,6 +387,8 @@ export function DesktopApp({ archivedOpen, setArchivedOpen }: ArchiveSectionProp
   const [newSession, setNewSession] = useState<{ project?: ProjectRef } | null>(null);
   const [settings, setSettings] = useState(false);
   const [maximized, setMaximized] = useState<string | null>(null);
+  // ドロップで並びが変わったら、着地の動きを見せる
+  useLayoutEffect(() => playLandings(layout), [layout, maximized]);
   const isFinePointer = useMemo(() => window.matchMedia('(pointer: fine)').matches, []);
 
   // 未読（確認待ちも含む）と、確認待ち（許可・質問のカードが出ている）
