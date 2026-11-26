@@ -27,6 +27,8 @@ export interface ClaudeDriverOptions {
   resolveDefaults?: boolean;
   /** 画像以外の添付ファイルの置き場所。省略時は local ならこのPCの一時フォルダ、それ以外は画像だけ受け付ける */
   attachments?: AttachmentStore;
+  /** 返答待ちのまま使われなかったプロセスを終わらせるまでの時間（ミリ秒、0 で終わらせない）。省略時は 20 分 */
+  idleTimeoutMs?: number;
   /** 旧版（MCP の許可サーバー）の名残。使わない */
   nodePath?: string;
 }
@@ -82,7 +84,7 @@ export function createClaudeDriver(options: ClaudeDriverOptions = {}): AgentDriv
       return checkClaudeAuth(launcher, claudePath, env);
     },
     async start(opts: StartOptions, emit: (event: DriverEvent) => void): Promise<DriverSession> {
-      const session = new ClaudeSession(opts, emit, { launcher, claudePath, env, resolveDefaults: options.resolveDefaults ?? true, attachments, configDir, rewind: canRewind });
+      const session = new ClaudeSession(opts, emit, { launcher, claudePath, env, resolveDefaults: options.resolveDefaults ?? true, attachments, configDir, rewind: canRewind, idleTimeoutMs: options.idleTimeoutMs });
       await session.init();
       return session;
     },

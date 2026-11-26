@@ -1,6 +1,7 @@
 // 1つの Claude セッション（claude CLI の子プロセス）を管理する。
 //
 // - プロセスは送信が必要になったときに起動し、ターンが終わっても標準入力を開いたまま次の指示を待つ。
+// - 返答待ち（idle）のまま一定時間（既定 20 分）使われなければ、プロセスを終わらせてメモリを空ける。
 // - プロセスが無い状態で送信されたら、`--resume <session_id>` で起動し直してから送る（Hub 再起動後の再開も同じ）。
 // - 子プロセスは起動役（ProcessLauncher）を通して起動する（local / ssh を Driver から切り離すため）。
 // - 許可要求は `--permission-prompt-tool stdio` で、標準出力の control_request（can_use_tool）として受け、
@@ -28,6 +29,8 @@ const INTERRUPT_TIMEOUT_MS = 5000;
 const STOP_TIMEOUT_MS = 3000;
 /** こちらから送った制御要求（権限モードの切り替えなど）の応答を待つ上限 */
 const CONTROL_TIMEOUT_MS = 15_000;
+/** 返答待ち（idle）のまま使われなかったプロセスを終わらせるまでの時間の既定（次の送信で --resume して続ける） */
+export const DEFAULT_IDLE_TIMEOUT_MS = 20 * 60_000;
 
 /** claude CLI に返す許可の決定（can_use_tool への応答）。 */
 export type PermissionResult =
@@ -64,6 +67,11 @@ export interface ClaudeSessionDeps {
   rewind?: boolean;
   /** claude CLI の設定フォルダ（CLAUDE_CONFIG_DIR）。省略時は起動先のホームの .claude */
   configDir?: string;
+  /**
+   * 返答待ち（idle）のまま、この時間使われなかったプロセスを終わらせる（メモリを空けるため。会話は次の送信で --resume して続ける）。
+   * バックグラウンド作業が動いている間は終わらせない。0 で終わらせない。省略時は DEFAULT_IDLE_TIMEOUT_MS
+   */
+  idleTimeoutMs?: number;
 }
 
 /** 既定やエイリアスを解決した、実際に使われるモデルとエフォート */
@@ -115,6 +123,7 @@ export class ClaudeSession implements DriverSession {
   private stopped = false;
   private interrupting = false;
   private interruptTimer: NodeJS.Timeout | null = null;
+  private idleTimer: NodeJS.Timeout | null = null;
   private killedOnPurpose = false;
   private stderrTail = '';
   private msgCounter = 0;
@@ -225,6 +234,28 @@ export class ClaudeSession implements DriverSession {
     if (this.status === status && !reason) return;
     this.status = status;
     this.emit(reason ? { type: 'status', status, reason } : { type: 'status', status });
+    this.scheduleIdleClose();
+  }
+
+  /** idle になったら、使われないまま一定時間たったプロセスを終わらせる予約をする（idle 以外になったら取り消す） */
+  private scheduleIdleClose(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    const ms = this.deps.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    if (ms <= 0 || this.status !== 'idle' || !this.proc || this.stopped) return;
+    this.idleTimer = setTimeout(() => this.onIdleTimeout(), ms);
+    this.idleTimer.unref?.();
+  }
+
+  private onIdleTimeout(): void {
+    this.idleTimer = null;
+    if (this.status !== 'idle' || !this.proc || this.stopping || this.stopped || this.interrupting) return;
+    // バックグラウンド作業や、こちらからの制御要求の応答待ちがあるうちは止めずに待ち直す
+    if (this.mapper.hasRunningTasks() || this.pending.size > 0 || this.outgoing.size > 0) {
+      this.scheduleIdleClose();
+      return;
+    }
+    void this.closeProcess();
   }
 
   private emitMode(mode: PermissionMode): void {
@@ -674,6 +705,8 @@ export class ClaudeSession implements DriverSession {
 
   private cleanup(): void {
     if (this.interruptTimer) clearTimeout(this.interruptTimer);
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
     this.failOutgoing('セッションを停止しました');
   }
 }

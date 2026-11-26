@@ -327,3 +327,70 @@ describe('AI からのセッション作成（hub-guide）', () => {
     expect(specs[0].args).not.toContain('--append-system-prompt');
   });
 });
+
+describe('使われていないプロセスの終了（idleTimeoutMs）', () => {
+  function launch(idleTimeoutMs: number) {
+    const clis: FakeCli[] = [];
+    const launcher: ProcessLauncher = {
+      os: 'linux',
+      homeDir: async () => '/home/me',
+      spawn() {
+        const c = new FakeCli();
+        clis.push(c);
+        return c as unknown as ChildProcessWithoutNullStreams;
+      },
+      run: async () => ({ code: 0, stdout: '', stderr: '' }),
+      remove: async () => {},
+    };
+    const events: DriverEvent[] = [];
+    const session = new ClaudeSession({ sessionId: 's1', cwd: '/w', permissionMode: 'ask' }, (e) => events.push(e), { launcher, claudePath: 'claude', env: {}, resolveDefaults: false, idleTimeoutMs });
+    return { session, events, clis };
+  }
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const result = { type: 'result', subtype: 'success', is_error: false, result: 'ok' };
+
+  it('ターンが終わって使われなければプロセスを終わらせ、次の送信で --resume して起動し直す', async () => {
+    const { session, events, clis } = launch(30);
+    await session.init();
+    await session.send({ type: 'send', text: 'hi' });
+    clis[0].out({ type: 'system', subtype: 'init', session_id: 'cli-sess', apiKeySource: 'none' });
+    clis[0].out(result);
+    let exited = false;
+    clis[0].on('exit', () => (exited = true));
+    await wait(80);
+    expect(exited).toBe(true);
+    // 意図した終了なのでエラーにはせず、idle のまま
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    expect(events.filter((e) => e.type === 'status').at(-1)).toEqual({ type: 'status', status: 'idle' });
+
+    await session.send({ type: 'send', text: 'next' });
+    expect(clis).toHaveLength(2);
+    expect(clis[1].written.at(-1)).toMatchObject({ type: 'user' });
+  });
+
+  it('バックグラウンド作業が動いている間は終わらせない', async () => {
+    const { session, clis } = launch(30);
+    await session.init();
+    await session.send({ type: 'send', text: 'hi' });
+    clis[0].out({ type: 'system', subtype: 'task_started', task_id: 'b1', tool_use_id: 'toolu_bash', task_type: 'local_bash', description: 'npm test' });
+    clis[0].out(result);
+    let exited = false;
+    clis[0].on('exit', () => (exited = true));
+    await wait(80);
+    expect(exited).toBe(false);
+    clis[0].out({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'completed' });
+    await wait(80);
+    expect(exited).toBe(true);
+  });
+
+  it('作業中は終わらせない', async () => {
+    const { session, clis } = launch(30);
+    await session.init();
+    await session.send({ type: 'send', text: 'hi' });
+    let exited = false;
+    clis[0].on('exit', () => (exited = true));
+    await wait(80);
+    expect(exited).toBe(false);
+    await session.stop();
+  });
+});

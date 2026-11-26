@@ -84,6 +84,8 @@ export class StreamMapper {
   private subagents = new Map<string, SubagentEv>();
   /** CLI の task_id → サブエージェントを起動したツールの toolId（task_updated には toolId が無いため） */
   private taskTools = new Map<string, string>();
+  /** 動いているバックグラウンド作業（サブエージェント・シェルなど）の task_id */
+  private runningTasks = new Set<string>();
   /** コンテキストの使用量（本流の直近の API 呼び出しのモデルとトークン数、最後に送った値） */
   private ctxModel = '';
   private ctxUsed = 0;
@@ -250,6 +252,13 @@ export class StreamMapper {
   /** system/task_*（サブエージェントの起動・進み具合・終了）を subagent イベントにする */
   private mapTask(msg: Json): DriverEvent[] {
     const taskId = typeof msg.task_id === 'string' ? msg.task_id : undefined;
+    // 種類を問わず、動いているバックグラウンド作業を数えておく（使われていないプロセスを止めてよいかの判断に使う）
+    if (taskId) {
+      if (msg.subtype === 'task_started') this.runningTasks.add(taskId);
+      else if (msg.subtype === 'task_updated' || msg.subtype === 'task_notification') {
+        if (subagentState(msg.subtype === 'task_updated' ? msg.patch?.status : msg.status)) this.runningTasks.delete(taskId);
+      }
+    }
     let toolId = typeof msg.tool_use_id === 'string' ? msg.tool_use_id : undefined;
     if (toolId && taskId) this.taskTools.set(taskId, toolId);
     if (!toolId && taskId) toolId = this.taskTools.get(taskId);
@@ -311,8 +320,14 @@ export class StreamMapper {
     return next;
   }
 
+  /** バックグラウンド作業（サブエージェント・シェルなど）が動いているか */
+  hasRunningTasks(): boolean {
+    return this.runningTasks.size > 0;
+  }
+
   /** まだ動いているサブエージェントを止まったことにする（CLI のプロセスが終わったとき） */
   stopSubagents(): DriverEvent[] {
+    this.runningTasks.clear();
     const out: DriverEvent[] = [];
     for (const [toolId, s] of this.subagents) {
       if (s.state !== 'running') continue;

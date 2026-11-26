@@ -123,7 +123,7 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 
 | プロトコル | Claude Code 側 |
 |---|---|
-| 起動 | `claude -p --output-format stream-json --input-format stream-json --verbose --include-partial-messages --permission-mode <mode> --permission-prompt-tool stdio --allow-dangerously-skip-permissions`。子プロセスは起動役（`local` / `ssh`）を通して起動する（6.6 の v4 までは Driver 内に起動役を持つ）。プロセスは最初の送信で起動し、ターンが終わっても標準入力を開いたまま次の指示を待つ |
+| 起動 | `claude -p --output-format stream-json --input-format stream-json --verbose --include-partial-messages --permission-mode <mode> --permission-prompt-tool stdio --allow-dangerously-skip-permissions`。子プロセスは起動役（`local` / `ssh`）を通して起動する（6.6 の v4 までは Driver 内に起動役を持つ）。プロセスは最初の送信で起動し、ターンが終わっても標準入力を開いたまま次の指示を待つ。返答待ち（idle）のまま 20 分使われなければプロセスを終わらせ（バックグラウンド作業が動いている間は待つ）、次の送信で `--resume` して起動し直す。状態は idle のまま |
 | 送信 | 標準入力に `{"type":"user","message":{"role":"user","content":"…"},"parent_tool_use_id":null}` を1行で書く。実行中に送ったものは CLI 側で次のターンに回る |
 | 添付ファイル | PNG / JPEG / GIF / WebP（3.75MB まで）は `content` を配列にして `{"type":"image","source":{"type":"base64","media_type":…,"data":…}}` で渡す。それ以外は Hub のPCの一時フォルダ（`<tmp>/agentpwa-attachments/<sessionId>/`）に保存し、本文の後ろにパスを書き足して Read ツールで読ませる。このフォルダは起動時に `--add-dir` で渡すので、確認なしで読める。SSH 先のマシン（起動役を差し替えたとき）では画像だけ受け付ける |
 | スラッシュコマンド | 一覧は、CLI を短く起動して制御要求 `{"subtype":"initialize"}` を送り、応答の `commands`（`name` / `description` / `argumentHint`）を使う（API は呼ばない）。`__` で始まる内部用は除く。実行は本文をそのまま送る（`/context` などの出力は、モデル `<synthetic>` の assistant メッセージで届く）。ただし引数つきの `/model <名前>` と `/effort <段階>` は CLI に送らず、`set_model` と同じ処理にする（Hub と Web の表示をそろえるため。`default` / `auto` は既定に戻す） |
