@@ -106,6 +106,11 @@ Web では、送ったメッセージの下に「フォーク・巻き戻し・�
 - **フォーク**: Hub の `POST /api/sessions/:id/fork`（`{ messageId }`）。Hub は `AgentDriver.forkToken` で新しいセッションの `resumeToken` をもらい、その発言のターンの終わり（次のユーザーの発言の直前）までの表示用のイベント（`message` / `tool` / 許可・質問とその解決）を写した新しいセッションを作る。起動は最初の送信まで待つ。元のセッションは変えない。まだ終わっていない最後のターンからはフォークできない。
 - `supportsRewind` / `forkToken` が無い Driver では、Web は巻き戻し・編集・フォークを出さない（コピーだけ）。
 
+### 3.8 Hub の説明とセッション間のメッセージ（v13）
+
+- Hub は起動・再開のたびに `StartOptions.hubGuide`（Markdown）を渡す。Hub の API の使い方（新しいセッションの作成、ほかのセッションへのメッセージ、入力欄の # の候補）と、このセッションの ID を含む。Driver はこれを、エージェントのシステムプロンプト（開発者向けの指示）にそのまま足す。省略されたら何も足さない。
+- ほかのセッションから届いたメッセージは、Hub が本文の先頭に送り元の段落（`formatPeerMessage`）を付けた、ふつうの `send` として届く。Driver は特別な扱いをしない（ユーザーの発言と同じく送り、`message`（`role: 'user'`）にもそのままの本文を入れる）。Web が `parsePeerMessage` で送り元を取り出して表示する。
+
 ## 4. 単体での開発とフィクスチャ
 
 Hub ができる前でも、各 Driver を単独で開発・確認できるようにします。
@@ -149,6 +154,7 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | 認証の確認 | `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` / `CLAUDE_CODE_USE_FOUNDRY` があれば `api_key`。無ければ `claude auth status`（JSON）の `authMethod` を見て、`claude.ai` / `oauth_token` は `subscription`、`api_key` / `api_key_helper` / `third_party` は `api_key`。起動後も system/init の `apiKeySource` が `none` 以外なら、エラー（fatal）を出して止める |
 | 使用量 | `rate_limit_event` の `unifiedWindows.five_hour` / `seven_day` / `seven_day_overage_included` の utilization を `usage`（「セッション枠（5時間）」「週間」「Fable（週間）」）にする。`seven_day_overage_included` は CLI が「Fable limit」と呼ぶ週間枠で、その枠がある契約のときだけ届く。`windowMinutes` はそれぞれ 300 / 10080 / 10080 |
 | コンテキストの使用量（v12） | `parent_tool_use_id` の無い assistant メッセージの `message.usage` の `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` + `output_tokens` を `context` の `usedTokens` にする（モデル `<synthetic>` は除く）。上限は result の `modelUsage[<モデル>].contextWindow`（Opus 5.5 は 1000000）を覚えて `windowTokens` に入れる。値が変わったときだけ送る。プロセスを起動し直した直後は上限が最初の result まで分からないので、Hub は前の上限を使い続ける |
+| Hub の説明（v13） | `StartOptions.hubGuide` を `--append-system-prompt` で渡す。子プロセスの環境変数に `AGENTPWA_SESSION_ID`（Hub のセッション ID）も入れる |
 | サブエージェント | `Agent`（古い版は `Task`）ツールの `tool_use` で `subagent`（running。`subagent_type` / `description` / `prompt`）を送る。`system/task_started` / `task_progress`（`description` を `progress` に）/ `task_updated`（`patch.status`）/ `task_notification`（`status` と `summary` を `result` に）を、`tool_use_id`（無いものは `task_id` から引く）で対応付けて送る。`task_type` が `local_agent` 以外（裏で動くシェルなど）は扱わない。既定では裏で動くので、`Agent` の `tool_result`（`tool_use_result.isAsync`）では終わりにしない。前面で動いたものは `tool_result` で `done` / `failed` にする。`parent_tool_use_id` の付いた assistant / user メッセージを、`parentToolId` 付きの `message` / `tool` にする（途中経過の stream_event は CLI が送らないので、`message_delta` は出さない）。CLI のプロセスが終わったら、動いたままのものを `stopped` にする |
 
 ### Codex への依頼（権限モード）
@@ -207,6 +213,11 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 
 - （任意）`context` イベント（`usedTokens`: 直近の呼び出しで文脈に入っているトークン数、`windowTokens`: モデルのコンテキストの上限）を送ってください。app-server のトークン使用量の通知（`thread/tokenUsage/updated` の `last` と `modelContextWindow` など）がそのまま使えるはずです。送れば、ペインのモデルとエフォートのボタンの横に使用率が出ます。
 
+### Codex への依頼（Hub の説明、v13）
+
+- `StartOptions.hubGuide` があれば、Codex の開発者向けの指示（`thread/start` / `thread/resume` の `developerInstructions` など、スレッドに付く指示）に足してください（3.8）。再開のたびに渡るので、同じ文が重ならないようにしてください。これで Codex のセッションも、新しいセッションの作成と、ほかのセッションへのメッセージができるようになります（説明は PowerShell の `Invoke-RestMethod` の例。ID は文中に書いてあるので、環境変数は要りません）。
+- ほかのセッションからのメッセージは、ふつうの `send` として届きます。特別な対応は要りません。
+
 ### Codex（`codex app-server`）— Codex 担当
 
 | プロトコル | Codex app-server 側 |
@@ -247,3 +258,4 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 | 2026-11-24 | 10 | サブエージェントの `subagent` イベントと、`message` / `message_delta` / `tool` の `parentToolId`（サブエージェントの中のイベント）を追加（3.6）。どちらも足しただけで、Codex 側の対応は任意 | Claude |
 | 2026-11-24 | 11 | 巻き戻しとフォーク（3.7）。`message` に `rewindable`、`DriverEvent` に `rewound`、`UserAction` に `rewind`（`RewindRestore`）、`AgentDriver` に `supportsRewind` / `forkToken` を追加。どれも省略可で、Codex 側の対応は任意 | Claude |
 | 2026-11-24 | 12 | `DriverEvent` に `context`（コンテキストの使用量。`usedTokens` と、上限の `windowTokens`（省略可））を追加。UI はペインのモデルとエフォートのボタンの横に使用率を出す。足しただけで、Codex 側の対応は任意 | Claude |
+| 2026-11-26 | 13 | `StartOptions.hubGuide`（Hub が AI に伝える Hub の API の説明。セッション ID を含む）と、セッション間のメッセージ（`PeerMessageFrom` / `formatPeerMessage` / `parsePeerMessage`）を追加（3.8）。足しただけで、Codex 側は `hubGuide` を指示に足す対応をお願いしたい（Codex への依頼） | Claude |

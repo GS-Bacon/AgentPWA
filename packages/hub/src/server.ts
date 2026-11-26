@@ -69,6 +69,12 @@ function parseAttachments(v: unknown): Attachment[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
+/** AI がセッションの中から Hub の API を呼んだときの、呼び出し元のセッション（X-AgentPWA-Session） */
+function callerSession(headers: Record<string, string | string[] | undefined>): string | undefined {
+  const h = headers['x-agentpwa-session'];
+  return (Array.isArray(h) ? h[0] : h)?.trim() || undefined;
+}
+
 function parseAction(body: unknown): UserAction {
   const b = (body ?? {}) as Record<string, unknown>;
   switch (b.type) {
@@ -186,7 +192,14 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   await app.register(fastifyWebsocket);
 
   app.get('/api/info', async (req) => info(req));
-  app.get('/api/sessions', async () => manager.list());
+  // brief=1 は、AI がメッセージの宛先を探すための短い一覧（アーカイブしていないものだけ。hub-guide.ts）
+  app.get<{ Querystring: { brief?: string } }>('/api/sessions', async (req) => {
+    const list = manager.list();
+    if (!req.query.brief) return list;
+    return list
+      .filter((s) => !s.archived)
+      .map((s) => ({ id: s.id, title: s.title, agent: s.agent, project: s.folderName, cwd: s.cwd, status: s.status }));
+  });
 
   // プロジェクトの作成（ルートフォルダ projectRoots の下だけ。作ったものは設定ファイルの folders に書き足す）
   app.get<{ Querystring: { path?: string } }>('/api/fs/dirs', async (req) => listDirs(config, req.query.path || undefined));
@@ -204,8 +217,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   app.post('/api/sessions', async (req) => {
     const b = (req.body ?? {}) as Partial<CreateSessionRequest>;
     // AI がセッションの中から作るときは、作成元のセッションを X-AgentPWA-Session で渡す（docs/architecture.md「AI からのセッション作成」）
-    const parentHeader = req.headers['x-agentpwa-session'];
-    const parent = (Array.isArray(parentHeader) ? parentHeader[0] : parentHeader)?.trim() || undefined;
+    const parent = callerSession(req.headers);
     if (b.agent !== undefined && !AGENTS.includes(b.agent)) throw new HttpError(400, 'agent が正しくありません');
     if (typeof b.cwd !== 'string' && !(parent && b.cwd === undefined)) throw new HttpError(400, 'フォルダを指定してください');
     // 省略時はプロジェクトの既定のモード。full_auto の可否は SessionManager が確かめる
@@ -252,7 +264,8 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   );
   // 添付ファイル（base64）を含められるよう、この API だけ本文の上限を上げる
   app.post<{ Params: { id: string } }>('/api/sessions/:id/action', { bodyLimit: ACTION_BODY_LIMIT }, async (req) => {
-    await manager.action(req.params.id, parseAction(req.body));
+    // AI が別のセッションから送ったときは、送り元を X-AgentPWA-Session で渡す（セッション間のメッセージ、v13）
+    await manager.action(req.params.id, parseAction(req.body), callerSession(req.headers));
     return { ok: true };
   });
   // フォーク（v11）: messageId（ユーザーの発言）のターンの終わりまでを引き継ぐ新しいセッションを作る

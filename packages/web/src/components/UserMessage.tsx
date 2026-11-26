@@ -5,7 +5,7 @@
 // - 巻き戻し: 戻すもの（会話とコード / 会話だけ / コードだけ）を選ぶダイアログを出す。会話を戻したら発言を入力欄に戻す
 // - フォーク: このターンまでの会話を引き継ぐ新しいセッションを作って開く
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { AttachmentInfo, RewindRestore } from '@agentpwa/shared';
+import { parsePeerMessage, type AttachmentInfo, type PeerMessageFrom, type RewindRestore } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { openSession, run, setDraft, showInfo, showToast, useStore } from '../lib/store.ts';
@@ -13,7 +13,20 @@ import { elapsed } from '../lib/format.ts';
 import { isActive } from '../lib/sessionActions.ts';
 import { formatBytes } from '../lib/attachments.ts';
 import { copyText } from './PathMarkdown.tsx';
-import { IconCheck, IconCopy, IconFile, IconFork, IconPencil, IconRewind } from './Icons.tsx';
+import { AgentIcon, IconCheck, IconCopy, IconFile, IconFork, IconPencil, IconRewind } from './Icons.tsx';
+
+/** 別のセッションから届いたメッセージの送り元（v13）。押すと送り元のセッションを開く */
+function PeerFrom({ from }: { from: PeerMessageFrom }) {
+  const current = useStore((s) => s.sessions[from.sessionId]);
+  const title = current?.title ?? from.title;
+  const label = `セッション「${title}」から`;
+  return (
+    <button type="button" className="msg-peer" disabled={!current} title={current ? `${label}（押すと開きます）` : `${label}（削除済み）`} onClick={() => openSession(from.sessionId)}>
+      <AgentIcon agent={from.agent} size={12} />
+      <span className="ellipsis">{label}</span>
+    </button>
+  );
+}
 
 function AttachmentList({ items }: { items: AttachmentInfo[] }) {
   return (
@@ -156,7 +169,10 @@ function ActionButton({ label, disabled, onClick, children }: { label: string; d
   );
 }
 
-export function UserMessage({ session, messageId, text, at, attachments, rewindable, last }: UserMessageProps) {
+export function UserMessage({ session, messageId, text: raw, at, attachments, rewindable, last }: UserMessageProps) {
+  // 別のセッションから届いたものは、先頭の送り元の段落を外して「〇〇から」と出す
+  const peer = parsePeerMessage(raw);
+  const text = peer ? peer.text : raw;
   const features = useStore((s) => s.info?.agents[session.agent]);
   const [mode, setMode] = useState<'view' | 'edit' | 'rewind'>('view');
   const [busy, setBusy] = useState(false);
@@ -222,6 +238,7 @@ export function UserMessage({ session, messageId, text, at, attachments, rewinda
         <EditBox initial={text} busy={busy} onSubmit={(t) => void submitEdit(t)} onCancel={() => setMode('view')} />
       ) : (
         <div className="msg-user">
+          {peer && <PeerFrom from={peer.from} />}
           {text}
           {attachments && attachments.length > 0 && <AttachmentList items={attachments} />}
         </div>

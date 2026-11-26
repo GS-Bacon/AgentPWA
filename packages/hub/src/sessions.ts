@@ -1,9 +1,10 @@
 // セッション管理: Driver の起動・停止・再開、イベントの採番・保存・配信。
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_PERMISSION_MODE, EFFORT_LEVELS, PERMISSION_MODES, type AgentDriver, type AgentKind, type AuthCheck, type DriverEvent, type DriverSession, type PermissionMode, type SessionEvent, type SlashCommand, type UserAction } from '@agentpwa/shared';
+import { DEFAULT_PERMISSION_MODE, EFFORT_LEVELS, PERMISSION_MODES, formatPeerMessage, type AgentDriver, type AgentKind, type AuthCheck, type DriverEvent, type DriverSession, type PermissionMode, type SessionEvent, type SlashCommand, type UserAction } from '@agentpwa/shared';
 import type { CreateSessionRequest, DeleteSessionResult, SessionSummary, UpdateSessionRequest, UsageInfo } from './api.ts';
 import { findAllowedFolder, isModeAllowed, type HubConfig } from './config.ts';
+import { buildHubGuide } from './hub-guide.ts';
 import type { Store } from './db.ts';
 import { applyEvent, effectiveEvents, isEmptySession, markRead, markUnread, newRecord, normalizeRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
 
@@ -257,8 +258,20 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return true;
   }
 
-  async action(id: string, action: UserAction): Promise<void> {
+  /**
+   * 操作を Driver に渡す。fromSessionId は、AI が Hub の API で別のセッションから送ったときの送り元
+   * （X-AgentPWA-Session）。送り元があれば send だけを受け付け、送り元を先頭に書いた本文にして渡す（v13）。
+   */
+  async action(id: string, action: UserAction, fromSessionId?: string): Promise<void> {
     const rec = this.mustGet(id);
+    if (fromSessionId) {
+      const from = this.records.get(fromSessionId);
+      if (!from) throw new HttpError(400, '送り元のセッションが見つかりません');
+      if (from.id === id) throw new HttpError(400, '自分のセッションには送れません');
+      if (action.type !== 'send') throw new HttpError(400, 'ほかのセッションからは send だけを送れます');
+      if (action.attachments?.length) throw new HttpError(400, 'ほかのセッションからはファイルを添付できません');
+      action = { type: 'send', text: formatPeerMessage({ sessionId: from.id, title: from.title, agent: from.agent }, action.text) };
+    }
     if (action.type === 'set_permission_mode') return this.setPermissionMode(id, action.mode);
     if (action.type === 'set_model') return this.setModel(id, action);
     if (action.type === 'send' && action.attachments?.length && !this.drivers.get(rec.agent)?.supportsAttachments) {
@@ -552,6 +565,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             permissionMode,
             initialPrompt,
             resumeToken: rec.resumeToken,
+            hubGuide: buildHubGuide(process.env.AGENTPWA_HUB_URL, id, rec.agent),
           },
           (ev) => {
             if (ev.type === 'error' && ev.fatal) fatalReported = true;

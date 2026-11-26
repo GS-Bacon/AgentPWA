@@ -8,7 +8,7 @@
  *   Hub と Web はエージェントの違いを知らなくても動くことを目標にする。
  */
 
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 /** エージェントの種類。UI ではタブ（Claude / Codex）の切り分けに使う。 */
 export type AgentKind = 'claude' | 'codex';
@@ -68,6 +68,43 @@ export interface StartOptions {
   initialPrompt?: string;
   /** 再開用。Driver が以前 `resume_token` イベントで返した値。 */
   resumeToken?: string;
+  /**
+   * v13: Hub が AI に伝える説明（Markdown）。Hub の API の使い方（新しいセッションの作成、ほかのセッションへの
+   * メッセージなど）と、このセッションの ID を含む。Driver は起動・再開のたびに、エージェントのシステムプロンプト
+   * （開発者向けの指示）に足す。省略は「伝えることがない」（Hub の URL が分からないときなど）。
+   */
+  hubGuide?: string;
+}
+
+/**
+ * v13: 別のセッションから届いたメッセージ（セッション間のメッセージ）の送り元。
+ * Hub は送り元を先頭の段落に書いた `send` として、宛先のセッションの Driver に渡す。
+ * Driver は特別な扱いをしない（ユーザーの発言と同じ）。Web は先頭の段落を見て「〇〇から」と表示する。
+ */
+export interface PeerMessageFrom {
+  sessionId: string;
+  title: string;
+  agent: AgentKind;
+}
+
+const PEER_AGENT_LABEL: Record<AgentKind, string> = { claude: 'Claude', codex: 'Codex' };
+const PEER_HEAD = /^\[AgentPWA\] セッション「([^\n]*)」（(Claude|Codex)、ID: ([A-Za-z0-9_-]+)）からのメッセージです。[^\n]*\n\n/;
+
+/** 送り元を先頭の段落に書いた本文を作る */
+export function formatPeerMessage(from: PeerMessageFrom, text: string): string {
+  const title = from.title.replace(/\s+/g, ' ').trim() || '無題';
+  return (
+    `[AgentPWA] セッション「${title}」（${PEER_AGENT_LABEL[from.agent]}、ID: ${from.sessionId}）からのメッセージです。` +
+    `返事が要るときは、このセッション ID 宛てに送ってください。\n\n${text}`
+  );
+}
+
+/** formatPeerMessage で作った本文を、送り元と本文に分ける（そうでなければ null） */
+export function parsePeerMessage(text: string): { from: PeerMessageFrom; text: string } | null {
+  const m = PEER_HEAD.exec(text);
+  if (!m) return null;
+  const agent: AgentKind = m[2] === 'Codex' ? 'codex' : 'claude';
+  return { from: { title: m[1], agent, sessionId: m[3] }, text: text.slice(m[0].length) };
 }
 
 /**

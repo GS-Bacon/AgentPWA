@@ -94,7 +94,7 @@ iPhone / iPad / Web から、Claude と Codex の複数セッションを同時�
   - **ファイルの添付**: 入力欄の左のクリップのボタンで選ぶほか、スクリーンショットなどの画像を貼り付ける、ファイルをペインにドロップする、でも添付できます。送る前は入力欄の上にファイル名（画像は小さなサムネイル）を出し、× で外せます。送った発言の下にはファイル名を出します。大きな画像は長い辺 2000px までに縮めて送ります。
   - **スラッシュコマンド**: 先頭に `/` を打つと、そのプロジェクトで使えるコマンド（組み込み・スキル・`.claude/commands`）の候補を入力欄の上に出します。↑↓ で選び、Tab か Enter で補完、Esc で閉じます（名前を打ち終わっていれば Enter でそのまま送信）。`/model <名前>` と `/effort <段階>` は、モデルとエフォートのボタンと同じ切り替えになります。
   - **ファイル（@）**: `@` を打つと、セッションの作業フォルダの下のファイルとフォルダの候補を出し、選ぶと `@パス` が入ります（`GET /api/sessions/:id/mentions?q=`。git の作業ツリーなら `git ls-files` で .gitignore の対象を除き、そうでなければ node_modules などを除いてたどる。一覧は Hub が 30 秒覚える）。フォルダを選ぶと閉じずに、その中の候補を続けて出します。AI には文字のまま届きます。
-  - **プロジェクトの候補（#）**: `#` を打つと、プロジェクトに登録した候補（例: 案件の記号 `J01`）を出し、選ぶと `#J01` が入ります。いくつでも続けて入れられます。候補は設定ファイルの `folders` の `tags`（`{ name, description? }` の配列）に置き、設定タブの「プロジェクト」で1行1件（「名前 説明」）で編集します。そのプロジェクトの AI も、ユーザーに頼まれれば `PATCH /api/projects`（本文は `{ path, agent, tags }`。全体を置き換え）で書き換えられます（Claude には driver-claude の hub-guide.ts で伝える）。そのプロジェクトに候補が無ければ、同じフォルダの別の AI のプロジェクトの候補を使います。
+  - **プロジェクトの候補（#）**: `#` を打つと、プロジェクトに登録した候補（例: 案件の記号 `J01`）を出し、選ぶと `#J01` が入ります。いくつでも続けて入れられます。候補は設定ファイルの `folders` の `tags`（`{ name, description? }` の配列）に置き、設定タブの「プロジェクト」で1行1件（「名前 説明」）で編集します。そのプロジェクトの AI も、ユーザーに頼まれれば `PATCH /api/projects`（本文は `{ path, agent, tags }`。全体を置き換え）で書き換えられます（Hub の hub-guide.ts の説明で伝える。6.8）。そのプロジェクトに候補が無ければ、同じフォルダの別の AI のプロジェクトの候補を使います。
   - `@` と `#` は、空白の後だけでなく日本語の直後（「案件＃J01」）でも出します（英数字の直後は、メールアドレスなどと区別するため出さない）。日本語入力では記号や英数字が全角（`／` `＠` `＃` `Ｊ０１`）になりやすいので、全角でも同じに扱い、補完した文字は半角にします。
   - 添付とスラッシュコマンドの補完は、対応している AI（いまは Claude）のセッションでだけ出します。`@` と `#` は AI によらず出します。
 - **ツールの表示**: 続けて呼ばれたツールは「✓ ツール 4件 Glob · Read · Bash 2」の1行にまとめて折りたたみ、押すと1件ずつの行を開きます（1件だけのときはその行をそのまま出します）。実行中は、いま動いているツールを同じ行に出します。
@@ -240,14 +240,18 @@ iPhone / iPad / Web から、Claude と Codex の複数セッションを同時�
 - MVP では `local` のマシンだけに対応し、Hub が直接ファイルを読みます。SSH のマシン（フェーズ3）では、起動役を通してそのマシン上で読みます（パスの確認もそのマシン上で行う）。
 - 今は MVP にプロジェクトの ID が無いため、セッションの ID で指定します。プロジェクトを SQLite に移すとき（6.3）に、`/files/<プロジェクトID>/…` に変えるかを決めます。
 
-### 6.8 AI からのセッション作成
+### 6.8 AI からのセッション作成とセッション間のメッセージ
 
 - Hub は起動時に自分の URL（`http://127.0.0.1:<port>`）を環境変数 `AGENTPWA_HUB_URL` に入れます。子プロセスはこれを引き継ぎます。
-- Claude の Driver は、CLI に `AGENTPWA_SESSION_ID`（Hub のセッション ID）を渡し、`--append-system-prompt` で作り方（下の `curl`）を伝えます（`packages/driver-claude/src/hub-guide.ts`）。
-- AI は `POST $AGENTPWA_HUB_URL/api/sessions` に `X-AgentPWA-Session: $AGENTPWA_SESSION_ID` を付けて送ります。本文は Web と同じ `CreateSessionRequest` で、`cwd` を省くと作成元と同じプロジェクトになります。Hub は作成元を `parentSessionId` として記録し、Web は `parentSessionId` 付きで新しく届いたセッションを自動で開きます。
+- Hub は Driver を起動・再開するたびに、AI への説明（Hub の API の使い方。このセッションの ID と、エージェントのシェルに合わせた例（Claude は bash の `curl`、Codex は PowerShell の `Invoke-RestMethod`）を含む）を `StartOptions.hubGuide` で渡します（v13。文面は `packages/hub/src/hub-guide.ts`）。Claude の Driver は、これを `--append-system-prompt` で伝え、CLI に `AGENTPWA_SESSION_ID`（Hub のセッション ID）も渡します。
+- AI は `POST /api/sessions` に `X-AgentPWA-Session: <自分のセッション ID>` を付けて送ります。本文は Web と同じ `CreateSessionRequest` で、`cwd` を省くと作成元と同じプロジェクトになります。Hub は作成元を `parentSessionId` として記録し、Web は `parentSessionId` 付きで新しく届いたセッションを自動で開きます。
 - 作成元が「すべて自動」でなければ、「すべて自動」のセッションは作れません（AI が確認を減らす抜け道にしないため）。プロジェクトの許可リストと `allowFullAuto` の確認は、Web から作るときと同じです。
 - このPCからの直接のリクエストになるので、設定ファイルの `allowLocalhost` が `true`（既定）である必要があります。
-- Codex への依頼: `driver-codex` でも、子プロセスに `AGENTPWA_SESSION_ID` を渡し、作り方を指示に足してください（`hub-guide.ts` の `withHubEnv` と `hubGuide` と同じ内容）。
+- **セッション間のメッセージ**: AI は、ほかのセッション（Claude でも Codex でも）にメッセージを送れます。宛先は `GET /api/sessions?brief=1`（アーカイブしていないセッションの `id`・`title`・`agent`・`project`・`cwd`・`status`）で探し、`POST /api/sessions/<宛先>/action` に `{ "type": "send", "text": "…" }` を `X-AgentPWA-Session` 付きで送ります。
+  - Hub は送り元を確かめ（存在しない・自分宛て・`send` 以外・添付ありは 400）、本文の先頭に「[AgentPWA] セッション「題名」（Claude、ID: …）からのメッセージです。…」の段落を付けて、宛先の Driver にふつうの `send` として渡します（`formatPeerMessage`）。宛先が作業中なら作業中の追加の指示として、止まっていれば起動して届きます。
+  - 返事は自動では戻りません。受け取った AI が、送り元の ID 宛てに同じ方法で送り返します。お礼や了解だけの返事はしないよう、説明に書いています。
+  - Web は先頭の段落を外し（`parsePeerMessage`）、発言の上に「セッション「題名」から」と出します。押すと送り元のセッションを開きます。
+- Codex への依頼: `driver-codex` で `StartOptions.hubGuide` を Codex の開発者向けの指示に足してください（docs/protocol.md「Codex への依頼（Hub の説明、v13）」）。それまでは、Codex のセッションはメッセージを受け取れますが、自分からは送れません（自分の ID と API の使い方を知らないため）。
 
 ## 7. セキュリティ
 
