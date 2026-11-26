@@ -109,6 +109,13 @@ function PaneView({
     };
   }, [zone]);
   const focused = layout.focused === pane.id;
+  // ペインを閉じて自動でフォーカスが移っただけのペイン（触るまで既読にしない）
+  const passive = focused && layout.passiveFocus === pane.id;
+  const focusPane = (e: React.SyntheticEvent) => {
+    // 閉じるボタンを押しただけでは、そのペインにフォーカスを移さない（閉じる前に既読になるのを防ぐ）
+    if ((e.target as HTMLElement).closest?.('[data-close-pane]')) return;
+    if (!focused || passive) update((l) => ({ ...l, focused: pane.id }));
+  };
   const waiting = needsAnswer(s);
 
   // 見出しをドラッグしてペインを動かす
@@ -181,6 +188,7 @@ function PaneView({
       <button
         className="btn btn-ghost btn-icon-sm"
         aria-label="ペインを閉じる"
+        data-close-pane
         title="ペインを閉じる"
         onClick={() => {
           if (maximized) setMaximized(null);
@@ -199,8 +207,8 @@ function PaneView({
         data-pane={pane.id}
         aria-label={`ペイン${index + 1}（ファイル）`}
         tabIndex={-1}
-        onMouseDownCapture={() => !focused && update((l) => ({ ...l, focused: pane.id }))}
-        onFocusCapture={() => !focused && update((l) => ({ ...l, focused: pane.id }))}
+        onMouseDownCapture={focusPane}
+        onFocusCapture={focusPane}
         {...dropTarget}
         onDragEnd={onHeadDragEnd}
         style={{ position: 'relative', minWidth: 0, minHeight: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', height: '100%' }}
@@ -222,8 +230,8 @@ function PaneView({
       data-pane={pane.id}
       aria-label={`ペイン${index + 1}`}
       tabIndex={-1}
-      onMouseDownCapture={() => !focused && update((l) => ({ ...l, focused: pane.id }))}
-      onFocusCapture={() => !focused && update((l) => ({ ...l, focused: pane.id }))}
+      onMouseDownCapture={focusPane}
+      onFocusCapture={focusPane}
       {...dropTarget}
       style={{ position: 'relative', minWidth: 0, minHeight: 0, background: 'var(--bg)', display: 'flex', flexDirection: 'column', height: '100%' }}
     >
@@ -263,7 +271,7 @@ function PaneView({
         {paneButtons}
       </header>
       {s ? (
-        <SessionView key={s.id} session={s} focused={focused} />
+        <SessionView key={s.id} session={s} focused={focused} autoRead={!passive} />
       ) : (
         <div className="empty" style={{ flex: 1, justifyContent: 'center' }}>
           <span>左の一覧からセッションをドラッグするか、選んで表示します</span>

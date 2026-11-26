@@ -205,11 +205,14 @@ function useSubagents(session: SessionSummary, events: Parameters<typeof buildSu
 export function SessionView({
   session,
   focused = true,
+  autoRead = true,
   compact = false,
   subLayout = 'split',
 }: {
   session: SessionSummary;
   focused?: boolean;
+  /** フォーカス中に既読にするか（ペインを閉じて自動でフォーカスが移ったときは、触るまで既読にしない） */
+  autoRead?: boolean;
   compact?: boolean;
   /** サブエージェントの出し方（スマホは 'full'） */
   subLayout?: 'split' | 'full';
@@ -261,7 +264,7 @@ export function SessionView({
   // 「未読にする」の印（markedUnread）も、フォーカスを移して開き直したときや新しい内容が届いたときに外す。
   // 印そのものは依存に入れない（このペインのメニューで「未読にする」を選んだ直後に、すぐ既読へ戻さないため）
   useEffect(() => {
-    if (!focused) return;
+    if (!focused || !autoRead) return;
     if (session.readSeq >= session.lastSeq && !getState().sessions[session.id]?.markedUnread) return;
     const mark = () => {
       if (document.visibilityState === 'visible') void api.read(session.id, session.lastSeq).catch(() => {});
@@ -272,7 +275,7 @@ export function SessionView({
       clearTimeout(t);
       document.removeEventListener('visibilitychange', mark);
     };
-  }, [focused, session.id, session.lastSeq, session.readSeq]);
+  }, [focused, autoRead, session.id, session.lastSeq, session.readSeq]);
 
   // 一番下にいるときは、新しい内容に合わせてスクロールする
   useLayoutEffect(() => {

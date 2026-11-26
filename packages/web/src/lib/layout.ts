@@ -29,6 +29,11 @@ export interface LayoutState {
   sidebarOpen: boolean;
   /** 一覧で畳んでいるプロジェクト（projectKey） */
   collapsed: string[];
+  /**
+   * ペインを閉じたことで自動でフォーカスが移ったペイン。
+   * ユーザーがそのペインを触るか、別の操作でフォーカスを決め直すまで、そのペインのセッションを既読にしない。
+   */
+  passiveFocus?: string | null;
 }
 
 const KEY = 'agentpwa.layout.v1';
@@ -90,7 +95,20 @@ export function useLayout(): [LayoutState, (fn: (s: LayoutState) => LayoutState)
       /* 保存できなくても動作は続ける */
     }
   }, [state]);
-  return [state, (fn) => setState((s) => syncCustom(fn(s)))];
+  return [state, (fn) => setState((s) => syncCustom(settlePassiveFocus(s, fn(s))))];
+}
+
+/**
+ * 自動で移ったフォーカス（passiveFocus）を、フォーカスに関わる操作が来たら外す。
+ * 幅の調整・一覧の開閉・プロジェクトの畳み・ペインを閉じる操作では外さない。
+ */
+export function settlePassiveFocus(prev: LayoutState, next: LayoutState): LayoutState {
+  if (!next.passiveFocus) return next;
+  if (next.focused !== next.passiveFocus) return { ...next, passiveFocus: null };
+  if (next.passiveFocus !== prev.passiveFocus || next === prev) return next;
+  const layoutOnly = next.custom !== prev.custom || next.sidebarOpen !== prev.sidebarOpen || next.collapsed !== prev.collapsed;
+  const closing = next.panes.length < prev.panes.length;
+  return layoutOnly || closing ? next : { ...next, passiveFocus: null };
 }
 
 export function resetLayout(): void {
@@ -111,8 +129,10 @@ export function addPane(s: LayoutState, sessionId: string | null = null): Layout
 export function closePane(s: LayoutState, paneId: string): LayoutState {
   let panes = s.panes.filter((p) => p.id !== paneId);
   if (panes.length === 0) panes = [{ id: newId(), sessionId: null }];
-  const focused = s.focused === paneId ? panes[Math.max(0, s.panes.findIndex((p) => p.id === paneId) - 1)]?.id ?? panes[0].id : s.focused;
-  return { ...s, panes, focused };
+  if (s.focused !== paneId) return { ...s, panes };
+  // 閉じたペインの隣へフォーカスを移すが、ユーザーが選んだわけではないので、そのセッションはまだ既読にしない
+  const focused = panes[Math.max(0, s.panes.findIndex((p) => p.id === paneId) - 1)]?.id ?? panes[0].id;
+  return { ...s, panes, focused, passiveFocus: focused };
 }
 
 export function setPaneSession(s: LayoutState, paneId: string, sessionId: string | null): LayoutState {
