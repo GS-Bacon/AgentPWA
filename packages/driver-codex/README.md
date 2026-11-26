@@ -17,6 +17,14 @@ await session.send({ type: 'send', text: 'このプロジェクトを説明し�
 await session.stop();
 ```
 
+## Hub の説明（v13）
+
+`StartOptions.hubGuide` があれば、有効な `config/read` の `developer_instructions` の後ろへ空行を挟んでそのまま足し、`thread/start` / `thread/resume` の `developerInstructions` として渡します。起動・再開ごとに設定と渡された説明から組み直して置き換えるため、履歴に同じ文を追記しません。説明なし（空文字を含む）では、この項目を省略して既存の指示を維持します。セッション間のメッセージは通常の `send` として本文を保持します。
+
+[公式 app-server 仕様](https://developers.openai.com/codex/app-server) の `collaborationMode.settings.developer_instructions: null` は、そのモードの標準の指示を使う指定です。スレッドの `developerInstructions` とは別で、Hub の説明を消しません。ターンには従来どおり `null` を指定し、既定・計画モードの指示を維持します。
+
+今回の確認版は **codex-cli 0.171.0-alpha.13.2 / Windows**（2026-11-26）です。実 CLI の `app-server generate-ts --experimental` で、開始・再開の両方の `developerInstructions?: string | null` と、モードの `Settings.developer_instructions: string | null` を確認しました。通常の検証は app-server のモックを使い、推論は実行していません。
+
 ## 課金経路の制限
 
 - `OPENAI_API_KEY`、`CODEX_API_KEY`、Azure のキー、独自の接続先を指定する環境変数があれば、プロセスを起動する前に拒否します。値は表示しません。

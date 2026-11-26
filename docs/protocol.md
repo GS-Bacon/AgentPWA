@@ -226,6 +226,7 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 | 初期化・起動 | `codex app-server --listen stdio://` → `initialize`（`experimentalApi: true`）→ `initialized` → `thread/start`。指示があるとき `turn/start`。JSONL の wire では `jsonrpc` ヘッダーを省略 |
 | 認証・課金経路の拒否 | 環境の API キー・独自接続先を拒否。有効な `config/read`（cwd の設定も含む）と `account/read` で標準プロバイダー＋ChatGPT 認証だけを許可。開始後も再検査し、認証変更時は停止。送信・許可・回答の前に `account/rateLimits/read` の `ordinaryUsageAllowed: true`、残り枠あり、`credits.hasCredits: false` を必須とする。不明・枠切れ・追加クレジットありは拒否。`serviceTier: default` を明示 |
 | 再開 | `thread/resume`。`thread.id` が分かればすぐ `resume_token`。過去の返答を再配信しない |
+| Hub の説明（v13） | `hubGuide` があれば、有効な設定の開発者向け指示に足して `thread/start` / `thread/resume` の `developerInstructions` に渡す。再開時も組み直して置き換えるため重複しない。省略時は上書きしない。`collaborationMode.settings.developer_instructions: null` はモード標準の指示を選び、スレッドの指示を維持する。セッション間のメッセージは通常の `send` として扱う |
 | 次の指示・実行中の追加指示 | アイドルでは `turn/start`、実行中は `turn/steer`（`expectedTurnId` つき）。操作を直列化し、開始応答後は `turn/started` を待って中断との競合を防ぐ |
 | 中断・終了 | `turn/interrupt` → `turn/completed` の `interrupted` で `idle`。`stop()` は stdio を閉じ、残れば自分の子プロセスのツリーを終了し、最後に `stopped` |
 | 許可要求 | `item/commandExecution/requestApproval` / `item/fileChange/requestApproval` / `item/permissions/requestApproval` を `approval_request` に変換。直後に待機状態。同時要求はすべて解決するまで待機。RPC の文字列 ID と数値 ID を区別 |

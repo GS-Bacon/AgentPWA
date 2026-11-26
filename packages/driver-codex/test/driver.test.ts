@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { DriverEvent, DriverSession } from '@agentpwa/shared';
+import { formatPeerMessage, type DriverEvent, type DriverSession } from '@agentpwa/shared';
 import { createDriver } from '../src/index.ts';
 import { FakeServer } from './fake-server.ts';
 import { RpcClient } from '../src/rpc.ts';
@@ -74,6 +74,91 @@ describe('課金経路の拒否', () => {
     server.notify('account/updated', { authMode: 'apikey' });
     await session.stop();
     expect(events.at(-1)).toEqual({ type: 'status', status: 'stopped' });
+  });
+});
+
+describe('Hub の説明（v13）', () => {
+  const hubGuide = '# Hub の API\nこのセッションの ID: hub-test\n```powershell\nInvoke-RestMethod -Uri http://127.0.0.1:8787/api/info\n```';
+
+  it.each([undefined, 'saved-thread'])('開始・再開（%s）で既存の指示に説明をそのまま足す', async (resumeToken) => {
+    const { start, server } = setup();
+    server.config.developer_instructions = '既存の開発者向けの指示';
+    await start({ hubGuide, resumeToken });
+    const thread = server.messages.find((m) => m.method === (resumeToken ? 'thread/resume' : 'thread/start'))!;
+    expect(thread.params.developerInstructions).toBe('既存の開発者向けの指示\n\n' + hubGuide);
+    expect(server.messages.some((m) => m.method === 'turn/start')).toBe(false);
+  });
+
+  it.each([undefined, 'saved-thread'])('説明なしの開始・再開（%s）では指示を上書きしない', async (resumeToken) => {
+    for (const guide of [undefined, '']) {
+      const { start, server } = setup();
+      server.config.developer_instructions = '既存の指示';
+      await start({ hubGuide: guide, resumeToken });
+      const thread = server.messages.find((m) => m.method === (resumeToken ? 'thread/resume' : 'thread/start'))!;
+      expect(thread.params).not.toHaveProperty('developerInstructions');
+    }
+  });
+
+  it('再開を繰り返しても説明を重複させず、新しい説明へ置き換える', async () => {
+    let resumeToken: string | undefined;
+    for (const guide of [hubGuide, hubGuide, '# 新しい Hub の説明']) {
+      const { start, server, events } = setup();
+      const session = await start({ hubGuide: guide, resumeToken });
+      const thread = server.messages.find((m) => m.method === (resumeToken ? 'thread/resume' : 'thread/start'))!;
+      expect(thread.params.developerInstructions).toBe(guide);
+      resumeToken = events.find((e) => e.type === 'resume_token')!.token;
+      await session.stop();
+    }
+  });
+
+  it.each(['ask', 'plan'] as const)('%s のターンとモード切り替えではスレッドの説明を再送しない', async (permissionMode) => {
+    const { start, server } = setup();
+    const session = await start({ hubGuide, permissionMode, initialPrompt: '最初の指示' });
+    server.notify('turn/completed', { threadId: 'thread-test', turn: { id: 'turn-1', status: 'completed' } });
+    const nextMode = permissionMode === 'plan' ? 'ask' : 'plan';
+    await session.send({ type: 'set_permission_mode', mode: nextMode });
+    await session.send({ type: 'send', text: '次の指示' });
+    const turns = server.messages.filter((m) => m.method === 'turn/start');
+    expect(turns).toHaveLength(2);
+    expect(turns.map((m) => m.params.collaborationMode.mode)).toEqual([
+      permissionMode === 'plan' ? 'plan' : 'default', nextMode === 'plan' ? 'plan' : 'default',
+    ]);
+    for (const turn of turns) {
+      expect(turn.params.collaborationMode.settings.developer_instructions).toBeNull();
+      expect(turn.params).not.toHaveProperty('developerInstructions');
+      expect(JSON.stringify(turn.params)).not.toContain(hubGuide);
+    }
+    expect(server.messages.find((m) => m.method === 'thread/start')!.params.developerInstructions).toBe(hubGuide);
+  });
+
+  it.each(['拒否', '未反映'])('自動承認のフォールバック（%s）でも説明を1回分だけ渡す', async (failure) => {
+    const { start, server } = setup();
+    server.handler = (m) => {
+      if (m.method !== 'thread/start' || m.params.approvalsReviewer !== 'auto_review') return;
+      return failure === '拒否'
+        ? { error: { code: -32602 } }
+        : { thread: { id: 'thread-test', turns: [] }, approvalsReviewer: 'user' };
+    };
+    await start({ hubGuide, permissionMode: 'auto' });
+    const threads = server.messages.filter((m) => ['thread/start', 'thread/resume'].includes(m.method));
+    expect(threads).toHaveLength(2);
+    expect(threads.map((m) => m.params.developerInstructions)).toEqual([hubGuide, hubGuide]);
+    expect(threads[1].params.approvalsReviewer).toBe('user');
+  });
+
+  it('他セッションからの本文を send と steer と user イベントにそのまま渡す', async () => {
+    const { start, server, events } = setup();
+    const session = await start({ hubGuide });
+    const text = formatPeerMessage({ sessionId: 'peer-id', title: '依頼元', agent: 'claude' }, '対応をお願いします');
+    await session.send({ type: 'send', text });
+    await session.send({ type: 'send', text });
+    const turns = server.messages.filter((m) => ['turn/start', 'turn/steer'].includes(m.method));
+    expect(turns.map((m) => m.params.input)).toEqual([
+      [{ type: 'text', text, text_elements: [] }], [{ type: 'text', text, text_elements: [] }],
+    ]);
+    expect(events.filter((e) => e.type === 'message' && e.role === 'user')).toEqual([
+      expect.objectContaining({ text }), expect.objectContaining({ text }),
+    ]);
   });
 });
 

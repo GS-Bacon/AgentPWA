@@ -61,6 +61,10 @@ export class CodexSession implements DriverSession {
       if (this.model && !this.models.some((m) => m.model === this.model || m.id === this.model)) {
         throw new Error('指定されたモデルは Codex のモデル一覧にありません');
       }
+      // スレッドの指示を毎回組み直して置き換える。再開済みの履歴へ追記しない。
+      const developerInstructions = this.opts.hubGuide
+        ? [config.developer_instructions, this.opts.hubGuide].filter(Boolean).join('\n\n')
+        : undefined;
       const threadParams = () => {
         const perm = permissions(this.mode, this.opts.cwd);
         return {
@@ -68,6 +72,7 @@ export class CodexSession implements DriverSession {
           cwd: this.opts.cwd, model: this.model ?? this.defaultModel, modelProvider: 'openai', serviceTier: 'default',
           approvalPolicy: perm.approvalPolicy, approvalsReviewer: perm.approvalsReviewer, sandbox: perm.sandbox,
           config: { model_reasoning_effort: this.effectiveEffort(), service_tier: 'default' },
+          ...(developerInstructions !== undefined ? { developerInstructions } : {}),
         };
       };
       let result: Wire;
@@ -192,6 +197,7 @@ export class CodexSession implements DriverSession {
               threadId: this.threadId, input, clientUserMessageId: messageId, cwd: this.opts.cwd,
               approvalPolicy: perm.approvalPolicy, approvalsReviewer: perm.approvalsReviewer, sandboxPolicy: perm.sandboxPolicy,
               model: this.model ?? this.defaultModel, effort: this.effectiveEffort(), serviceTier: 'default',
+              // null はモード標準の指示を選ぶ。スレッドの developerInstructions は維持される。
               collaborationMode: { mode: this.mode === 'plan' ? 'plan' : 'default', settings: {
                 model: this.model ?? this.defaultModel, reasoning_effort: this.effectiveEffort(), developer_instructions: null,
               } },
