@@ -63,7 +63,7 @@ npm run setup
 
 ## 設定ファイル（`~/.agentpwa/config.json`）
 
-ふだんは画面から設定できるので、編集しなくてかまいません。保存すると Hub が自動で読み直します（`port`・`claudePath`・`codex` を除く）。書き方の例: [packages/hub/config.example.json](packages/hub/config.example.json)
+ふだんは画面から設定できるので、編集しなくてかまいません。保存すると Hub が自動で読み直します（`port`・`claudePath`・`codex`・`codexPath` を除く）。書き方の例: [packages/hub/config.example.json](packages/hub/config.example.json)
 
 | キー | 内容 | 既定 |
 |---|---|---|
@@ -76,6 +76,7 @@ npm run setup
 | `viewerRoots` | プロジェクトのフォルダのほかに、ファイルビュワーで開いてよいフォルダ（絶対パスの配列）。パソコン版 Google ドライブは自動で加わる | `[]` |
 | `claudePath` | `claude` CLI のパス | PATH と `~/.local/bin` を探す |
 | `codex` | `"fake"`（フィクスチャを流す表示確認用）か `"driver"`（`@agentpwa/driver-codex` を使う） | `"fake"` |
+| `codexPath` | `codex` CLI のパス（`codex: "driver"` のとき） | PATH を探し、無ければ Codex デスクトップアプリのいまの版の `codex.exe` を使う。アプリが更新されて場所が変わっても、次のセッション開始で追いかける |
 
 - 別の場所の設定ファイルを使うときは、環境変数 `AGENTPWA_CONFIG` にパスを入れます。`AGENTPWA_PORT` でポートだけ上書きできます。
 - セッションの履歴は設定ファイルと同じフォルダの `hub.db`（SQLite）に保存されます。Hub を再起動しても履歴は残り、止まったセッションは「再開」か、次の送信で `claude --resume` により続きから再開します。

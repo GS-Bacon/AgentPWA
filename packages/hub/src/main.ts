@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { AgentDriver, AgentKind } from '@agentpwa/shared';
 import { createClaudeDriver } from '@agentpwa/driver-claude';
 import { autoFillConfig } from './autoconfig.ts';
+import { withCodexPath } from './codex-path.ts';
 import { loadConfig, watchConfig } from './config.ts';
 import { Store } from './db.ts';
 import { createFakeDriver } from './fake-driver.ts';
@@ -14,13 +15,15 @@ import { SessionManager } from './sessions.ts';
 const HOST = '127.0.0.1';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-async function loadCodexDriver(mode: 'fake' | 'driver'): Promise<{ driver: AgentDriver; fake: boolean }> {
+async function loadCodexDriver(mode: 'fake' | 'driver', codexPath?: string): Promise<{ driver: AgentDriver; fake: boolean }> {
   if (mode === 'driver') {
     try {
       // Codex 担当の Driver（packages/driver-codex）。まだ無い環境でも Hub が型エラーにならないよう動的に読む
       const name = '@agentpwa/driver-codex';
-      const mod = (await import(name)) as { createCodexDriver: () => AgentDriver };
-      return { driver: mod.createCodexDriver(), fake: false };
+      const mod = (await import(name)) as { createCodexDriver: (options?: { codexPath?: string }) => AgentDriver };
+      if (codexPath) return { driver: mod.createCodexDriver({ codexPath }), fake: false };
+      // パスを指定しないときは、Codex アプリの更新で codex.exe の場所が変わっても追えるよう、確認と起動のたびに PATH を直す
+      return { driver: withCodexPath(mod.createCodexDriver()), fake: false };
     } catch (e) {
       console.warn(`[hub] driver-codex を読み込めないため、フェイク Driver を使います: ${(e as Error).message}`);
     }
@@ -50,7 +53,7 @@ async function main(): Promise<void> {
   // セッションの中の AI が Hub の API を呼べるよう、子プロセスに URL を伝える（driver-claude の hub-guide.ts）
   process.env.AGENTPWA_HUB_URL = `http://${HOST}:${config.port}`;
 
-  const codex = await loadCodexDriver(config.codex);
+  const codex = await loadCodexDriver(config.codex, config.codexPath);
   const drivers = new Map<AgentKind, AgentDriver>([
     ['claude', createClaudeDriver({ claudePath: config.claudePath })],
     ['codex', codex.driver],

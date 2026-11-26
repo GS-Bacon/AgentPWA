@@ -61,6 +61,8 @@ export interface HubConfig {
   claudePath?: string;
   /** Codex タブの Driver。'fake' はフィクスチャを流すだけの表示確認用 */
   codex: 'fake' | 'driver';
+  /** codex CLI のパス（省略時は PATH を探し、無ければ Codex デスクトップアプリのいまの版の codex.exe を使う） */
+  codexPath?: string;
   /** SQLite などを置くフォルダ */
   dataDir: string;
 }
@@ -104,6 +106,7 @@ function validate(c: HubConfig, file: string): HubConfig {
     errors.push('viewerRoots は絶対パスの配列にしてください');
   }
   if (c.codex !== 'fake' && c.codex !== 'driver') errors.push("codex は 'fake' か 'driver' にしてください");
+  if (c.codexPath !== undefined && typeof c.codexPath !== 'string') errors.push('codexPath は文字列にしてください');
   if (errors.length) throw new Error(`設定ファイル ${file} の誤り:\n- ${errors.join('\n- ')}`);
   for (const f of c.folders ?? []) {
     const label = f.name ?? f.path;
@@ -187,7 +190,7 @@ export function isModeAllowed(config: HubConfig, cwd: string, agent: AgentKind, 
 
 /**
  * 設定ファイルの変更を見張り、再起動なしで反映できる項目（folders / projectRoots / allowedUsers / allowLocalhost / machineName）を
- * config に書き戻す。port・claudePath・codex・dataDir の変更は Hub の再起動が必要。
+ * config に書き戻す。port・claudePath・codex・codexPath・dataDir の変更は Hub の再起動が必要。
  */
 export function watchConfig(file: string, config: HubConfig, onChange: () => void): () => void {
   let timer: NodeJS.Timeout | null = null;
