@@ -52,7 +52,6 @@ beforeEach(async () => {
     projectRoots: [],
     codex: 'fake',
     dataDir: dir,
-    agentDefaults: { claude: {}, codex: {} },
   } as unknown as HubConfig;
   const commands: SlashCommand[] = [{ name: 'compact', description: '会話を要約' }];
   const claude = driver('claude', {

@@ -313,7 +313,7 @@ export async function updateAgentDefaults(deps: ProjectDeps, body: unknown): Pro
     return true;
   });
   // 監視による読み直しを待たずに反映する
-  deps.config.agentDefaults = { ...deps.config.agentDefaults, [agent]: value };
+  deps.config.agentDefaults = { claude: {}, codex: {}, ...deps.config.agentDefaults, [agent]: value };
   deps.onChanged();
   return deps.config.agentDefaults;
 }

@@ -86,7 +86,6 @@ beforeEach(() => {
     projectRoots: [],
     codex: 'fake',
     dataDir: dir,
-    agentDefaults: { claude: {}, codex: {} },
   };
 });
 

@@ -14,7 +14,7 @@ describe('AI ごとの既定のモデルとエフォート', () => {
     expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).agentDefaults).toEqual({ claude: { model: 'opus', effort: 'high' } });
     all = await updateAgentDefaults(deps(), { agent: 'claude', effort: null });
     expect(all.claude).toEqual({ model: 'opus' });
-    expect(loadConfig(configPath).config.agentDefaults.claude).toEqual({ model: 'opus' });
+    expect(loadConfig(configPath).config.agentDefaults?.claude).toEqual({ model: 'opus' });
     await updateAgentDefaults(deps(), { agent: 'claude', model: null });
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     expect(raw.agentDefaults).toBeUndefined();

@@ -105,9 +105,9 @@ export interface HubConfig {
   dataDir: string;
   /**
    * AI ごとの既定のモデルとエフォート。新しいセッションで省いたとき（と、既定に戻したとき）に使う。
-   * 省いた項目は CLI の既定。読み込み時に両方の AI をそろえる
+   * 省いた項目は CLI の既定。読み込み時に両方の AI をそろえる（テストなどで省いたときは、どちらも CLI の既定）
    */
-  agentDefaults: Record<AgentKind, AgentDefaults>;
+  agentDefaults?: Record<AgentKind, AgentDefaults>;
 }
 
 export interface LoadedConfig {
