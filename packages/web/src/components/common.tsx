@@ -4,9 +4,9 @@ import type { AgentKind } from '@agentpwa/shared';
 import type { SessionSummary, UsageInfo } from '@agentpwa/hub/api';
 import { api } from '../lib/api.ts';
 import { dismissToast, run, useStore } from '../lib/store.ts';
-import { archiveSession, deleteSession, setPinned, setUnread, unarchiveSession } from '../lib/sessionActions.ts';
+import { archiveSession, deleteSession, setLater, setPinned, setUnread, unarchiveSession } from '../lib/sessionActions.ts';
 import { elapsed, statusView } from '../lib/format.ts';
-import { IconMore, IconPin } from './Icons.tsx';
+import { IconClock, IconMore, IconPin } from './Icons.tsx';
 
 export function StatusLabel({ s, withTime, now }: { s: SessionSummary; withTime?: boolean; now?: number }) {
   const v = statusView(s);
@@ -52,6 +52,7 @@ export function sessionMenuItems(s: SessionSummary): MenuItem[] {
     items.push(
       s.pinned ? { label: 'ピン止めを外す', onClick: () => void setPinned(s.id, false) } : { label: 'ピン止め', onClick: () => void setPinned(s.id, true) },
       s.unread ? { label: '既読にする', onClick: () => void setUnread(s.id, false) } : { label: '未読にする', onClick: () => void setUnread(s.id, true) },
+      s.laterSince ? { label: 'あとで返信を外す', onClick: () => void setLater(s.id, false) } : { label: 'あとで返信', onClick: () => void setLater(s.id, true) },
       s.live
         ? { label: '停止', onClick: () => void run(() => api.stop(s.id)), danger: true }
         : { label: s.resumable ? '再開' : '起動', onClick: () => void run(() => api.resume(s.id)) },
@@ -213,13 +214,21 @@ export function ShowMoreButton({ rest, onClick, className = 'show-more' }: { res
   );
 }
 
-/** ピン止めの印（一覧の行） */
-export function PinMark({ s }: { s: Pick<SessionSummary, 'pinned'> }) {
-  if (!s.pinned) return null;
+/** ピン止めと「あとで返信」の印（一覧の行） */
+export function PinMark({ s }: { s: Pick<SessionSummary, 'pinned' | 'laterSince'> }) {
   return (
-    <span className="pin-mark" title="ピン止め" aria-label="ピン止め">
-      <IconPin size={12} />
-    </span>
+    <>
+      {s.laterSince && (
+        <span className="pin-mark" title="あとで返信" aria-label="あとで返信">
+          <IconClock size={12} />
+        </span>
+      )}
+      {s.pinned && (
+        <span className="pin-mark" title="ピン止め" aria-label="ピン止め">
+          <IconPin size={12} />
+        </span>
+      )}
+    </>
   );
 }
 

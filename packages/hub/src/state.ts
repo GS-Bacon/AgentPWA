@@ -35,6 +35,8 @@ export interface SessionRecord {
   pinned?: boolean;
   /** ユーザーが「未読にする」で付けた印。既読にすると外れる。古い記録には無い */
   markedUnread?: boolean;
+  /** ユーザーが「あとで返信」の印を付けた時刻。ユーザーが送信・回答する、外す、「未読にする」で外れる。古い記録には無い */
+  laterSince?: string;
   /** このセッションを作った AI のセッション（AI が Hub の API で作ったときだけ） */
   parentSessionId?: string;
   /** コンテキストの使用量（Driver が送った最新の context） */
@@ -195,33 +197,35 @@ export function isUnread(rec: Pick<SessionRecord, 'status' | 'turnEndSeq' | 'rea
 }
 
 export function rankOf(rec: SessionRecord): Rank {
+  if (rec.status === 'waiting_approval') return 1;
+  // 「あとで返信」の印があるものは、許可待ち以外は「あとで」にまとめる（AI の返答が届いても上に戻さない）
+  if (rec.laterSince) return 5;
   switch (rec.status) {
-    case 'waiting_approval':
-      return 1;
     case 'waiting_input':
       return 2;
     case 'idle':
-      return isUnread(rec) ? 3 : 5;
+      return isUnread(rec) ? 3 : 6;
     case 'running':
     case 'starting':
       return 4;
     default:
       // 停止・エラーでも、「未読にする」で印を付けたものは未読に入れる
-      return isUnread(rec) ? 3 : 5;
+      return isUnread(rec) ? 3 : 6;
   }
 }
 
 /**
  * 並べ替えの比較関数。
  * ピン止めしたものを先に出す。ピン止めの中と残りの中では、それぞれ順位の小さい順。同じ順位の中では待ちが長い順（statusSince の古い順）。
- * ただし 5（アイドル・停止）は「待ち」ではないので、最近動いた順にする。
+ * ただし 5（あとで返信）は印を付けた順、6（アイドル・停止）は「待ち」ではないので最近動いた順にする。
  */
 export function compareRecords(a: SessionRecord, b: SessionRecord): number {
   if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
   const ra = rankOf(a);
   const rb = rankOf(b);
   if (ra !== rb) return ra - rb;
-  if (ra === 5) return b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
+  if (ra === 5) return (a.laterSince ?? '').localeCompare(b.laterSince ?? '') || a.id.localeCompare(b.id);
+  if (ra === 6) return b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
   return a.statusSince.localeCompare(b.statusSince) || a.id.localeCompare(b.id);
 }
 
@@ -236,10 +240,23 @@ export function markRead(rec: SessionRecord, seq?: number): SessionRecord {
   return { ...rec, readSeq: Math.max(rec.readSeq, target), markedUnread: false };
 }
 
-/** 「未読にする」の印を付ける（開いて既読にするまで、一覧で未読として扱う） */
+/** 「未読にする」の印を付ける（開いて既読にするまで、一覧で未読として扱う）。「あとで返信」の印は外す */
 export function markUnread(rec: SessionRecord): SessionRecord {
-  if (rec.markedUnread) return rec;
-  return { ...rec, markedUnread: true };
+  if (rec.markedUnread && !rec.laterSince) return rec;
+  return { ...clearLater(rec), markedUnread: true };
+}
+
+/** 「あとで返信」の印を付ける（既読にもする）。付いていれば時刻は変えない */
+export function markLater(rec: SessionRecord, now = new Date().toISOString()): SessionRecord {
+  const read = markRead(rec);
+  return read.laterSince ? read : { ...read, laterSince: now };
+}
+
+/** 「あとで返信」の印を外す */
+export function clearLater(rec: SessionRecord): SessionRecord {
+  if (!rec.laterSince) return rec;
+  const { laterSince: _, ...rest } = rec;
+  return rest;
 }
 
 /**
@@ -278,6 +295,7 @@ export function toSummary(rec: SessionRecord, extra: { machine: string; live: bo
     unread: isUnread(rec),
     markedUnread: Boolean(rec.markedUnread),
     pinned: Boolean(rec.pinned),
+    laterSince: rec.laterSince,
     rank: rankOf(rec),
     resumable: Boolean(rec.resumeToken),
     live: extra.live,

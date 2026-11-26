@@ -108,6 +108,7 @@ kbd {
 .st-unread { color: var(--unread); }
 .st-running { color: var(--running); }
 .st-idle { color: var(--fg-faint); }
+.st-later { color: var(--fg-muted); }
 .st-error { color: var(--danger); }
 .dot { font-size: 11px; line-height: 1; }
 

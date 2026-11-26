@@ -38,7 +38,8 @@ import { FileViewer } from '../components/FileViewer.tsx';
 import { onOpenFile } from '../lib/viewer.ts';
 import { expectLanding, paneRect, playLandings } from './paneMotion.ts';
 import { getPaneDrag, setPaneDrag, usePaneDrag } from './paneDrag.ts';
-import { AgentIcon, IconClose, IconMaximize, IconSidebar } from '../components/Icons.tsx';
+import { setLater } from '../lib/sessionActions.ts';
+import { AgentIcon, IconClock, IconClose, IconMaximize, IconSidebar } from '../components/Icons.tsx';
 
 /** ペインを動かすドラッグのデータの種類 */
 const PANE_DRAG_TYPE = 'application/x-agentpwa-pane';
@@ -327,6 +328,22 @@ function PaneView({
               s={s}
               extra={[{ label: 'ペインから外す', onClick: () => update((l) => setPaneSession(l, pane.id, null)) }]}
             />
+            {!s.archived && (
+              // 「あとで返信」の印を付けて（既読にもなる）ペインを閉じる。印はこのセッションに送信・回答すると外れる
+              <button
+                className="btn btn-ghost btn-icon-sm"
+                aria-label="あとで返信にして閉じる"
+                data-close-pane
+                title="あとで返信にして閉じる"
+                onClick={() => {
+                  void setLater(s.id, true);
+                  if (maximized) setMaximized(null);
+                  update((l) => closePane(l, pane.id));
+                }}
+              >
+                <IconClock size={14} />
+              </button>
+            )}
           </>
         ) : (
           <span className="muted" style={{ flex: 1, fontSize: 13 }}>空のペイン</span>

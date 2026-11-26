@@ -489,7 +489,7 @@ describe('ピン止めと未読', () => {
     expect(second.manager.get(a.id).pinned).toBe(true);
     expect(second.manager.get(b.id).markedUnread).toBe(true);
     // 開いて既読にすると印が外れる（新しいイベントが無くても）
-    expect(second.manager.read(b.id)).toMatchObject({ unread: false, markedUnread: false, rank: 5 });
+    expect(second.manager.read(b.id)).toMatchObject({ unread: false, markedUnread: false, rank: 6 });
     expect(await second.manager.update(a.id, { pinned: false })).toMatchObject({ pinned: false });
     second.store.close();
   });

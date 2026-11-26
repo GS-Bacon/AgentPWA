@@ -6,7 +6,7 @@ import type { CreateSessionRequest, DeleteSessionResult, SessionSummary, UpdateS
 import { findAllowedFolder, isModeAllowed, isModelName, MODEL_INVALID, type HubConfig } from './config.ts';
 import { buildHubGuide } from './hub-guide.ts';
 import type { Store } from './db.ts';
-import { applyEvent, effectiveEvents, isEmptySession, markRead, markUnread, newRecord, normalizeRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
+import { applyEvent, clearLater, effectiveEvents, isEmptySession, markLater, markRead, markUnread, newRecord, normalizeRecord, recoverAfterRestart, sortRecords, titleFromPrompt, toSummary, type SessionRecord } from './state.ts';
 
 /** フォークで新しいセッションに写すイベント（会話の表示に要るもの） */
 const FORK_COPY = new Set<DriverEvent['type']>(['message', 'tool', 'approval_request', 'approval_resolved', 'question', 'question_resolved']);
@@ -290,6 +290,17 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     } catch (e) {
       throw new HttpError(409, (e as Error).message);
     }
+    // ユーザーが送信・回答したら「あとで返信」の印を外す（ほかのセッションの AI から届いたものでは外さない）
+    if (!fromSessionId && (action.type === 'send' || action.type === 'answer')) this.dropLater(id);
+  }
+
+  private dropLater(id: string): void {
+    const rec = this.records.get(id);
+    if (!rec?.laterSince) return;
+    const next = clearLater(rec);
+    this.records.set(id, next);
+    this.store.saveSession(next);
+    this.emit('session', this.summary(next));
   }
 
   /**
@@ -438,7 +449,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   /**
-   * 名前の変更、アーカイブ・解除、ピン止め、未読・既読の切り替え。
+   * 名前の変更、アーカイブ・解除、ピン止め、未読・既読、あとで返信の切り替え。
    * アーカイブするときは、動いているセッション（stopped 以外）を先に止める。解除しても stopped のままで、
    * 次に送信したときに resume_token で再開する。
    */
@@ -456,6 +467,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (typeof patch.pinned === 'boolean') next.pinned = patch.pinned;
     if (patch.unread === true) next = markUnread(next);
     else if (patch.unread === false) next = markRead(next);
+    if (patch.later === true) next = markLater(next);
+    else if (patch.later === false) next = clearLater(next);
     this.records.set(id, next);
     this.store.saveSession(next);
     const sum = this.summary(next);

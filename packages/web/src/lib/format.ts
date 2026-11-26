@@ -63,6 +63,8 @@ export interface StatusView {
 }
 
 export function statusView(s: SessionSummary): StatusView {
+  // 「あとで返信」の印があるもの（許可待ちを除く）。印を付けた後に返答が届いていれば未読も添える
+  if (s.laterSince && s.status !== 'waiting_approval') return s.unread ? { label: 'あとで・未読', cls: 'st-unread' } : { label: 'あとで', cls: 'st-later' };
   switch (s.status) {
     case 'waiting_approval':
       return { label: s.agent === 'codex' ? '承認待ち' : '許可待ち', cls: 'st-approval' };
@@ -99,6 +101,7 @@ export function timeLabel(s: SessionSummary, now = Date.now()): string {
   if (s.rank <= 2) return elapsed(s.statusSince, now);
   if (s.rank === 3) return `${elapsed(s.statusSince, now)}前`;
   if (s.rank === 4) return elapsed(s.statusSince, now);
+  if (s.rank === 5 && s.laterSince) return `${elapsed(s.laterSince, now)}前`;
   return elapsed(s.updatedAt, now);
 }
 

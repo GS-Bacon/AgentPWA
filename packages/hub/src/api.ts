@@ -8,10 +8,11 @@ export type UsageInfo = Extract<DriverEvent, { type: 'usage' }>;
 
 /**
  * 表示の優先順位（docs/architecture.md「表示の優先順位」）。
- * 1 許可待ち / 2 質問待ち / 3 完了・未読 / 4 実行中 / 5 アイドル・停止
+ * 1 許可待ち / 2 質問待ち / 3 完了・未読 / 4 実行中 / 5 あとで返信 / 6 アイドル・停止
+ * 「あとで返信」の印（laterSince）があるものは、許可待ちを除いて 5 に入れる。
  * 一覧では、ピン止め（pinned）したものを順位にかかわらず先に出す。
  */
-export type Rank = 1 | 2 | 3 | 4 | 5;
+export type Rank = 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface SessionSummary {
   id: string;
@@ -42,6 +43,8 @@ export interface SessionSummary {
   markedUnread: boolean;
   /** ピン止め（一覧の先頭に出す） */
   pinned: boolean;
+  /** 「あとで返信」の印を付けた時刻（印が無ければ省略）。ユーザーが送信・回答すると外れる */
+  laterSince?: string;
   rank: Rank;
   /** 再開できるか（resume_token を受け取っているか） */
   resumable: boolean;
@@ -251,6 +254,8 @@ export interface UpdateSessionRequest {
   pinned?: boolean;
   /** true で「未読にする」（印を付ける）、false で既読にする（最新まで読んだことにする） */
   unread?: boolean;
+  /** true で「あとで返信」の印を付ける（既読にもする）、false で外す */
+  later?: boolean;
 }
 
 /** DELETE /api/sessions/:id の応答 */

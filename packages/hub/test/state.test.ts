@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DriverEvent, SessionEvent } from '@agentpwa/shared';
-import { applyEvent, isUnread, markRead, markUnread, newRecord, rankOf, recoverAfterRestart, sortRecords, titleFromPrompt, type SessionRecord } from '../src/state.ts';
+import { applyEvent, clearLater, isUnread, markLater, markRead, markUnread, newRecord, rankOf, recoverAfterRestart, sortRecords, titleFromPrompt, type SessionRecord } from '../src/state.ts';
 
 function rec(id = 's1', now = '2026-11-24T00:00:00.000Z'): SessionRecord {
   return newRecord({ id, agent: 'claude', title: 't', cwd: 'C:\\w', folderName: 'w', permissionMode: 'ask', now, started: true });
@@ -72,7 +72,7 @@ describe('状態遷移', () => {
       { type: 'status', status: 'stopped' },
     ]);
     expect(r.pendingApprovals).toEqual([]);
-    expect(rankOf(r)).toBe(5);
+    expect(rankOf(r)).toBe(6);
   });
 
   it('resume_token を覚える', () => {
@@ -103,7 +103,7 @@ describe('既読管理', () => {
     expect(rankOf(r)).toBe(3);
     r = markRead(r);
     expect(isUnread(r)).toBe(false);
-    expect(rankOf(r)).toBe(5);
+    expect(rankOf(r)).toBe(6);
   });
 
   it('起動直後の idle（作業していない）は未読にしない', () => {
@@ -137,7 +137,7 @@ describe('既読管理', () => {
       // 新しいイベントが無くても、既読にすれば印は外れる
       r = markRead(r);
       expect(r.markedUnread).toBe(false);
-      expect(rankOf(r)).toBe(5);
+      expect(rankOf(r)).toBe(6);
     }
   });
 });
@@ -175,6 +175,40 @@ describe('並べ替え', () => {
     const idle = play(rec('idle'), [{ type: 'status', status: 'stopped' }], 40);
     const sorted = sortRecords([idle, marked, approval, pinnedIdle, pinnedRunning]).map((r) => r.id);
     expect(sorted).toEqual(['pinned-running', 'pinned-idle', 'approval', 'marked', 'idle']);
+  });
+});
+
+describe('あとで返信', () => {
+  it('印を付けると既読になり、許可待ち以外は「あとで」（5）に入る。返答が届いても上に戻らない', () => {
+    let r = play(rec(), [{ type: 'status', status: 'running' }, { type: 'status', status: 'waiting_input' }]);
+    expect(rankOf(r)).toBe(2);
+    r = markLater(r, '2026-11-24T01:00:00.000Z');
+    expect(r.laterSince).toBe('2026-11-24T01:00:00.000Z');
+    expect(r.readSeq).toBe(r.lastSeq);
+    expect(rankOf(r)).toBe(5);
+    r = play(r, [{ type: 'status', status: 'running' }, { type: 'status', status: 'idle' }], 10);
+    expect(isUnread(r)).toBe(true);
+    expect(rankOf(r)).toBe(5);
+    // 許可待ちはこれまでどおり先頭
+    r = play(r, [{ type: 'status', status: 'waiting_approval' }], 20);
+    expect(rankOf(r)).toBe(1);
+  });
+
+  it('付け直しても時刻は変えない。外す・「未読にする」で外れる', () => {
+    let r = markLater(play(rec(), [{ type: 'status', status: 'stopped' }]), '2026-11-24T01:00:00.000Z');
+    expect(markLater(r, '2026-11-24T02:00:00.000Z').laterSince).toBe('2026-11-24T01:00:00.000Z');
+    expect(clearLater(r).laterSince).toBeUndefined();
+    r = markUnread(r);
+    expect(r.laterSince).toBeUndefined();
+    expect(rankOf(r)).toBe(3);
+  });
+
+  it('並びは 実行中 → あとで（付けた順） → アイドル', () => {
+    const running = play(rec('running'), [{ type: 'status', status: 'running' }]);
+    const idle = play(rec('idle'), [{ type: 'status', status: 'stopped' }], 50);
+    const later2 = markLater(play(rec('later2'), [{ type: 'status', status: 'waiting_input' }]), '2026-11-24T02:00:00.000Z');
+    const later1 = markLater(play(rec('later1'), [{ type: 'status', status: 'stopped' }]), '2026-11-24T01:00:00.000Z');
+    expect(sortRecords([idle, later2, later1, running]).map((r) => r.id)).toEqual(['running', 'later1', 'later2', 'idle']);
   });
 });
 

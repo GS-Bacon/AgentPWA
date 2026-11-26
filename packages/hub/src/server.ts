@@ -242,7 +242,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   // 空のセッション（何も書き込まれていない）なら消す。Web がペインを閉じたとき・別のセッションに切り替えたときに呼ぶ
   app.post<{ Params: { id: string } }>('/api/sessions/:id/discard', async (req) => ({ removed: await manager.discardIfEmpty(req.params.id) }));
 
-  // 名前の変更、アーカイブ・解除、ピン止め、未読・既読（アーカイブするときは、動いているセッションを先に止める）
+  // 名前の変更、アーカイブ・解除、ピン止め、未読・既読、あとで返信（アーカイブするときは、動いているセッションを先に止める）
   app.patch<{ Params: { id: string }; Body: UpdateSessionRequest }>('/api/sessions/:id', async (req) => {
     const b = req.body ?? {};
     return manager.update(req.params.id, {
@@ -250,6 +250,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       archived: typeof b.archived === 'boolean' ? b.archived : undefined,
       pinned: typeof b.pinned === 'boolean' ? b.pinned : undefined,
       unread: typeof b.unread === 'boolean' ? b.unread : undefined,
+      later: typeof b.later === 'boolean' ? b.later : undefined,
     });
   });
 

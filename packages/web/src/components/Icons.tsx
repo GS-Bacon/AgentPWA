@@ -55,6 +55,8 @@ export const IconPencil = (p: { size?: number }) => <Svg {...p}><path d="M16.5 3
 export const IconSidebar = (p: { size?: number }) => <Svg {...p}><rect x="3" y="4" width="18" height="16" /><path d="M9 4v16" /></Svg>;
 /** ピン止め（画鋲） */
 export const IconPin = (p: { size?: number }) => <Svg {...p}><path d="M9 4h6M10 4v6l-3 4h10l-3-4V4M12 14v7" /></Svg>;
+/** あとで返信（時計） */
+export const IconClock = (p: { size?: number }) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
 
 
 /** AI のアイコン（Claude は橙の吹き出し、Codex は青の </>）。プロジェクトに固定された AI を示す */

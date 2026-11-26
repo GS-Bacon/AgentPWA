@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react';
 import type { AgentKind } from '@agentpwa/shared';
 import type { SessionSummary } from '@agentpwa/hub/api';
 import { getState, moveProject, needsAnswer, useStore, waitingCount } from '../lib/store.ts';
-import { AGENT_COLOR, AGENT_LABEL, elapsed } from '../lib/format.ts';
+import { AGENT_COLOR, AGENT_LABEL, elapsed, timeLabel } from '../lib/format.ts';
 import { openSessionInNewPane, type LayoutState } from '../lib/layout.ts';
 import { archivedSessions, buildProjects, projectKey, type Project, type ProjectRef } from '../lib/projects.ts';
 import { useNow } from '../components/Requests.tsx';
@@ -46,6 +46,10 @@ function SideRow({ s, paneNo, selected, now, onOpen, onMenu }: { s: SessionSumma
       </span>
     ) : s.rank === 4 ? (
       <span className="srow-sub mono muted ellipsis">{s.activity ?? '作業中…'}</span>
+    ) : s.rank === 5 ? (
+      <span className="srow-sub ellipsis">
+        <StatusLabel s={s} /> <span className="muted">· {timeLabel(s, now)}</span>
+      </span>
     ) : (
       <span className="srow-sub ellipsis muted">
         {s.status === 'stopped' ? '停止' : s.status === 'error' ? 'エラー' : 'アイドル'} · {elapsed(s.updatedAt, now)}
@@ -80,13 +84,13 @@ function SideRow({ s, paneNo, selected, now, onOpen, onMenu }: { s: SessionSumma
       title={s.title}
       style={{ paddingLeft: selected ? 26 : 28 }}
     >
-      {(s.rank >= 4 || s.archived) && (
+      {(s.rank === 4 || s.rank === 6 || s.archived) && (
         <span className="dot" style={{ color: s.rank === 4 ? 'var(--running)' : s.status === 'error' ? 'var(--danger)' : 'var(--fg-faint)' }} aria-hidden="true">
           ●
         </span>
       )}
       <span className="srow-main">
-        <span className="srow-title ellipsis" style={s.rank === 5 ? { fontWeight: 500 } : undefined}>{s.title}</span>
+        <span className="srow-title ellipsis" style={s.rank === 6 ? { fontWeight: 500 } : undefined}>{s.title}</span>
         {sub}
       </span>
       <PinMark s={s} />
@@ -124,7 +128,7 @@ function ProjectGroup({
   // 並べ替えでドラッグ中のプロジェクトが、この見出しの上半分（before）か下半分（after）にあるか
   const [dropAt, setDropAt] = useState<'before' | 'after' | null>(null);
   // 多いときは LIST_PAGE 件ずつ出す。ピン止め・あなたの番・実行中と、ペインに出しているものは常に出す
-  const page = useShowMore(p.sessions, (s) => s.pinned || s.rank <= 4 || paneNo.has(s.id));
+  const page = useShowMore(p.sessions, (s) => s.pinned || s.rank <= 5 || paneNo.has(s.id));
   const accepts = (e: React.DragEvent) => p.registered && e.dataTransfer.types.includes(PROJECT_DRAG_TYPE);
   return (
     <div>

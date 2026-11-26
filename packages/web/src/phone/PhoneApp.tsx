@@ -7,7 +7,7 @@ import { discardIfEmpty, onSessionCreatedByAgent, onSessionsClosed, sortedSessio
 import type { ArchiveSectionProps } from '../App.tsx';
 import { elapsed, projectHeadStyle, shortPath, timeLabel } from '../lib/format.ts';
 import { archivedSessions, buildProjects, findProject, useProjectColor, type Project, type ProjectRef } from '../lib/projects.ts';
-import { archiveSession, deleteSession, setPinned, setUnread, unarchiveSession } from '../lib/sessionActions.ts';
+import { archiveSession, deleteSession, setLater, setPinned, setUnread, unarchiveSession } from '../lib/sessionActions.ts';
 import { ApprovalInline, useNow } from '../components/Requests.tsx';
 import { AutoWarn, ConnState, PinMark, SessionMenu, ShowMoreButton, StatusLabel, useShowMore } from '../components/common.tsx';
 import { SessionView } from '../components/SessionView.tsx';
@@ -87,7 +87,8 @@ function PhoneRow({ s, now, onOpen, showProject }: { s: SessionSummary; now: num
       </article>
     );
   }
-  const dotColor = s.rank === 4 ? 'var(--running)' : s.status === 'error' ? 'var(--danger)' : 'var(--fg-faint)';
+  // あとで返信は、印を付けた後に返答が届いていれば未読の色にする
+  const dotColor = s.rank === 4 ? 'var(--running)' : s.rank === 5 ? (s.unread ? 'var(--unread)' : 'var(--fg-muted)') : s.status === 'error' ? 'var(--danger)' : 'var(--fg-faint)';
   return (
     <div className="row row-compact" onClick={onOpen} role="link" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onOpen()}>
       <span className="dot" style={{ color: dotColor }} aria-hidden="true">●</span>
@@ -275,6 +276,7 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
           : [
               s.pinned ? { label: 'ピン止めを外す', onClick: () => void setPinned(s.id, false) } : { label: 'ピン止め', onClick: () => void setPinned(s.id, true) },
               s.unread ? { label: '既読にする', onClick: () => void setUnread(s.id, false) } : { label: '未読にする', onClick: () => void setUnread(s.id, true) },
+              s.laterSince ? { label: 'あとでを外す', onClick: () => void setLater(s.id, false) } : { label: 'あとで', onClick: () => void setLater(s.id, true) },
               { label: 'アーカイブ', onClick: () => void archiveSession(s.id) },
               { label: '削除', onClick: () => void deleteSession(s.id), danger: true },
             ]
@@ -284,12 +286,13 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
     </SwipeRow>
   );
   const total = waitingCount(sessions);
-  // ピン止めを先頭にまとめ、残りを「あなたの番 / 実行中 / アイドル」に分ける。アイドルとアーカイブ済みは多いと長いので、LIST_PAGE 件ずつ出す
+  // ピン止めを先頭にまとめ、残りを「あなたの番 / 実行中 / あとで返信 / アイドル」に分ける。アイドルとアーカイブ済みは多いと長いので、LIST_PAGE 件ずつ出す
   const pinned = list.filter((s) => s.pinned);
   const rest = list.filter((s) => !s.pinned);
   const mine = rest.filter((s) => s.rank <= 3);
   const running = rest.filter((s) => s.rank === 4);
-  const idle = rest.filter((s) => s.rank === 5);
+  const later = rest.filter((s) => s.rank === 5);
+  const idle = rest.filter((s) => s.rank === 6);
   const idlePage = useShowMore(idle);
   const archivedPage = useShowMore(archived);
   const newHash = project ? `#/new?cwd=${encodeURIComponent(project.path)}&agent=${project.agent}` : '#/new';
@@ -348,6 +351,8 @@ function ListScreen({ projectKey, archivedOpen, setArchivedOpen, go }: ArchiveSe
         {mine.map(row)}
         {running.length > 0 && <h2 className="list-heading">実行中 · {running.length}</h2>}
         {running.map(row)}
+        {later.length > 0 && <h2 className="list-heading">あとで返信 · {later.length}</h2>}
+        {later.map(row)}
         {idle.length > 0 && <h2 className="list-heading">アイドル · {idle.length}</h2>}
         {idlePage.shown.map(row)}
         <ShowMoreButton rest={idlePage.rest} onClick={idlePage.more} className="show-more show-more-lg" />
@@ -396,7 +401,10 @@ function DetailScreen({ id, back }: { id: string; back: () => void }) {
             <AgentIcon agent={s.agent} size={12} /> {s.folderName} · <StatusLabel s={s} withTime now={now} /> <AutoWarn s={s} />
           </p>
         </div>
-        <SessionMenu s={s} />
+        <SessionMenu
+          s={s}
+          extra={s.archived || s.laterSince ? undefined : [{ label: 'あとで返信にして戻る', onClick: () => void setLater(s.id, true).then(back) }]}
+        />
       </header>
       <SessionView session={s} focused subLayout="full" />
     </div>

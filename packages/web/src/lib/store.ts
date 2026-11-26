@@ -410,7 +410,8 @@ export function sortedSessions(sessions: Record<string, SessionSummary>, agent?:
     .sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       if (a.rank !== b.rank) return a.rank - b.rank;
-      if (a.rank === 5) return b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
+      if (a.rank === 5) return (a.laterSince ?? '').localeCompare(b.laterSince ?? '') || a.id.localeCompare(b.id);
+      if (a.rank === 6) return b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
       return a.statusSince.localeCompare(b.statusSince) || a.id.localeCompare(b.id);
     });
 }

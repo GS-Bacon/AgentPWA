@@ -32,6 +32,11 @@ export async function setUnread(id: string, unread: boolean): Promise<void> {
   await run(() => api.update(id, { unread }));
 }
 
+/** 「あとで返信」の印を付ける・外す（付けると既読にもする。そのセッションに送信・回答すると外れる。全端末で共有） */
+export async function setLater(id: string, later: boolean): Promise<void> {
+  await run(() => api.update(id, { later }));
+}
+
 /** 削除する。元に戻せないので確認を1回挟む */
 export async function deleteSession(id: string): Promise<void> {
   const s = getState().sessions[id];
