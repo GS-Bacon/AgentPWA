@@ -211,11 +211,24 @@ Codex 担当で、できるものから対応してください（3.3 を参照�
 
 | プロトコル | Codex app-server 側 |
 |---|---|
-| 起動 | `thread/start` → `turn/start` |
-| 許可要求 | サーバーからの承認リクエスト（メソッド名は公式ドキュメントで確認する） |
-| 再開 | `thread/resume`（`resume_token` = thread.id） |
-| 中断 | `turn/interrupt` |
-| 実行中の追加指示 | `turn/steer` |
+| 確認した版 | codex-cli **0.171.0-alpha.13**（Windows、Node.js 24.22.1、2026-11-24）。公式仕様と CLI 生成型を照合。認証・承認・質問・中断を実機確認。詳細と制約は [Driver README](../packages/driver-codex/README.md) |
+| 初期化・起動 | `codex app-server --listen stdio://` → `initialize`（`experimentalApi: true`）→ `initialized` → `thread/start`。指示があるとき `turn/start`。JSONL の wire では `jsonrpc` ヘッダーを省略 |
+| 認証・課金経路の拒否 | 環境の API キー・独自接続先を拒否。有効な `config/read`（cwd の設定も含む）と `account/read` で標準プロバイダー＋ChatGPT 認証だけを許可。開始後も再検査し、認証変更時は停止。送信・許可・回答の前に `account/rateLimits/read` の `ordinaryUsageAllowed: true`、残り枠あり、`credits.hasCredits: false` を必須とする。不明・枠切れ・追加クレジットありは拒否。`serviceTier: default` を明示 |
+| 再開 | `thread/resume`。`thread.id` が分かればすぐ `resume_token`。過去の返答を再配信しない |
+| 次の指示・実行中の追加指示 | アイドルでは `turn/start`、実行中は `turn/steer`（`expectedTurnId` つき）。操作を直列化し、開始応答後は `turn/started` を待って中断との競合を防ぐ |
+| 中断・終了 | `turn/interrupt` → `turn/completed` の `interrupted` で `idle`。`stop()` は stdio を閉じ、残れば自分の子プロセスのツリーを終了し、最後に `stopped` |
+| 許可要求 | `item/commandExecution/requestApproval` / `item/fileChange/requestApproval` / `item/permissions/requestApproval` を `approval_request` に変換。直後に待機状態。同時要求はすべて解決するまで待機。RPC の文字列 ID と数値 ID を区別 |
+| 許可の回答 | `allow` → `accept`、`allow_session` → `acceptForSession`、`deny` → `decline` または `cancel`。サーバーが指定した `availableDecisions` に絞る。追加権限は要求された権限だけを turn / session の範囲で返す。補足文 `note` は未対応のため理由を通知 |
+| ファイル変更・対象パス | `item/started` の `fileChange.changes` を承認に添付。新規・削除ファイルの本文を unified diff に変換し、行数を集計。`tool.paths` は変更元・移動先、画像表示、`commandActions` の `read.path` を使用 |
+| 質問 | `item/tool/requestUserInput`（旧名 `tool/requestUserInput` も受信）→ `question.questions`。見出し・選択肢・説明を保持し、`answer.answers[i]` を元の質問 ID ごとの `answers` に変換。秘密情報の質問と未知の要求は拒否 |
+| 返答・ツール | `item/agentMessage/delta` → 同じ ID の確定 `message`。`item/started` / `item/completed` を `tool` に変換。中断・停止時の残りの返答断片も確定 |
+| 権限モード（起動時） | `ask` = `untrusted` + `read-only`、`auto_edit` = `on-request` + `workspace-write`、`auto` = 同左 + `approvalsReviewer: auto_review`、`full_auto` = `never` + `danger-full-access`、`plan` = `never` + `read-only` + `collaborationMode: plan`。`ask` でも信頼された読み取りコマンドは Codex の判断で実行される。起動時に `auto` が反映できなければ理由を通知して `ask` に落とす |
+| 権限モード（切り替え） | 次の `turn/start` から反映。現在のターンと未解決の承認には適用しない。`permission_mode` は次のターン用の設定として通知 |
+| モデル・エフォート | `model/list` の全ページを取得し、有効な設定・モデルごとの対応範囲を確認。`turn/start` の `model` / `effort` へ指定。共有型の `low` / `medium` / `high` / `xhigh` / `max` のうち選択モデルが対応する値だけを許可。`set_model` は次のターンから反映し、無効な組は元の組を維持。`null` は既定へ戻す。`model` に指定値と解決できた実際の値を通知 |
+| 使用量 | `account/rateLimits/read` / `account/rateLimits/updated` の primary / secondary を `usage` に変換。`usedPercent` → `percent`、Unix 秒の `resetsAt` → ISO、`windowDurationMins` → `windowMinutes`。通知は部分更新として扱い、明示的な枠切れ・クレジット残高追加の通知時は停止 |
+| 添付・スラッシュコマンド | 今回は未対応（`supportsAttachments: false`、`listCommands` なし）。`/…` は通常の指示として届く |
+| 履歴削除 | `deleteHistory` は未実装。確認した `thread/delete` / `thread/archive` は子スレッドにも及ぶため、共通契約の「そのセッションだけ」を保証できない。Hub 側の履歴だけ削除される |
+| Claude 担当への連携依頼 | ルートの `test` / `typecheck` と Hub の依存へ本パッケージを追加し、lockfile を更新する。Web の候補は `model/list` に合わせる（実機確認は `gpt-6.2-sol` / `low`、このモデルは `max` にも対応）。Hub は既存の動的 import で読める。設定は `codex: driver` と対象フォルダの `agent: codex` が必要 |
 
 ## 6. 変更履歴
 
