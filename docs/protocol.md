@@ -157,6 +157,23 @@ Hub ができる前でも、各 Driver を単独で開発・確認できるよ�
 | Hub の説明（v13） | `StartOptions.hubGuide` を `--append-system-prompt` で渡す。子プロセスの環境変数に `AGENTPWA_SESSION_ID`（Hub のセッション ID）も入れる |
 | サブエージェント | `Agent`（古い版は `Task`）ツールの `tool_use` で `subagent`（running。`subagent_type` / `description` / `prompt`）を送る。`system/task_started` / `task_progress`（`description` を `progress` に）/ `task_updated`（`patch.status`）/ `task_notification`（`status` と `summary` を `result` に）を、`tool_use_id`（無いものは `task_id` から引く）で対応付けて送る。`task_type` が `local_agent` 以外（裏で動くシェルなど）は扱わない。既定では裏で動くので、`Agent` の `tool_result`（`tool_use_result.isAsync`）では終わりにしない。前面で動いたものは `tool_result` で `done` / `failed` にする。`parent_tool_use_id` の付いた assistant / user メッセージを、`parentToolId` 付きの `message` / `tool` にする（途中経過の stream_event は CLI が送らないので、`message_delta` は出さない）。CLI のプロセスが終わったら、動いたままのものを `stopped` にする |
 
+### Codex への依頼の状況（2026-11-27 時点、main の driver-codex で確認）
+
+| 依頼 | 状況 |
+|---|---|
+| 権限モード | 済み（Codex の対応表） |
+| モデルとエフォート（v4・v6） | 済み。Web の選択肢（`MODELS.codex` / `EFFORTS.codex`）を `model/list` に合わせる作業が残っている |
+| ツールの対象ファイル（v5） | 済み |
+| 運用ルールの変更 | 未対応（AGENTS.md にまだ `protocol/*` ブランチと `codex/*` の決まりが残っている） |
+| 添付ファイル（v7） | main では未対応（Codex が対応中）。スラッシュコマンドは未対応 |
+| 質問の選択肢（v8） | 済み |
+| 巻き戻しとフォーク（v11） | 未対応（任意） |
+| セッションの削除 | 実装しないと決定（対応表の「履歴削除」） |
+| 使用量の枠の長さ（v9） | 済み |
+| サブエージェント（v10） | 未対応（任意） |
+| コンテキストの使用量（v12） | 未対応（任意） |
+| Hub の説明（v13） | 済み |
+
 ### Codex への依頼（権限モード）
 
 Codex 担当で、次を対応表に追加してください（AGENTS.md と driver-codex は Codex 担当）。
